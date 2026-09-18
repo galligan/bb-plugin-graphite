@@ -3,56 +3,167 @@
 What a BB plugin can read from Graphite, what it must shell out for, and where the
 gaps are.
 
-Verified 2026-09-18 against Graphite CLI `1.8.6`. Re-verify the ref shape and flag
-behavior when the CLI updates.
+Verified 2026-09-18 against Graphite CLI `1.8.6`. Re-verify the metadata schema and
+flag behavior when the CLI updates.
 
-## Read the stack from git refs
+## Read the stack from `.git/.graphite_metadata.db`
 
-Graphite records stack topology as git refs. Each tracked branch has one ref at
-`refs/branch-metadata/<branch>` pointing to a blob of JSON.
+Graphite CLI `1.8.6` stores stack topology in a SQLite database inside the git
+directory. It does **not** use git refs. Verified 2026-09-18 in a scratch repository
+built with `gt init` plus three `gt create` calls, and cross-read against 21 tracked
+repositories under `~/Developer` (413 rows).
+
+- Resolve the database path as `git rev-parse --git-common-dir` + `/.graphite_metadata.db`.
+  MUST NOT assume `<repo>/.git`.
+- A git worktree has no metadata of its own. `--git-common-dir` from inside a worktree
+  resolves to the main repository's `.git`, and `gt` in that worktree reads the same
+  database. Verified.
+- Open the database read-only. `journal_mode` is `delete`; there is no `-wal` or `-shm`
+  sidecar.
+- Read the trunk branch name from `<git-common-dir>/.graphite_repo_config`, field
+  `trunk`. MUST NOT infer trunk from `validation_result`; see below.
+
+### `refs/branch-metadata/*` is obsolete. Do not read it.
+
+An earlier revision of this file told you to read stack topology from
+`refs/branch-metadata/<branch>`. That is wrong for `1.8.6`.
+
+- `gt init`, `gt create`, `gt modify`, `gt restack`, `gt track`, and `gt ls` in a fresh
+  repository wrote **zero** `refs/branch-metadata/*` refs. Verified.
+- Of 21 metadata-carrying repositories on this machine, 3 still have a
+  `refs/branch-metadata/*` entry, all in `packed-refs`, all left by an older CLI.
+- Those surviving refs disagree with the database. In `~/Developer/outfitter/stack`,
+  `refs/branch-metadata/main` records two children and `branchRevision fcbbea62`;
+  the database records `children []` and `branch_revision abc84593`. The `packed-refs`
+  file predates `.graphite_metadata.db` by two days.
+- Treat any `refs/branch-metadata/*` ref as stale legacy data. MUST NOT read it.
+
+### Schema
+
+```sql
+CREATE TABLE "branch_metadata" (
+  "branch_name"            text not null primary key,
+  "parent_branch_name"     text,
+  "parent_branch_revision" text,
+  "last_submitted_version" text,
+  "state"                  text,
+  "children"               text,
+  "branch_revision"        text,
+  "validation_result"      text,
+  "parent_head_revision"   text
+);
+CREATE INDEX "idx_branch_metadata_parent" on "branch_metadata" ("parent_branch_name");
+```
+
+Every nullable column is SQLite `NULL` or `text`. Read each one as
+`string | null`; never assume a string.
+
+The database also carries `kysely_migration` and `kysely_migration_lock`. All 21
+repositories report the same three migrations:
+`20260211_initial_schema`, `20260212_add_validation_columns`,
+`20260220_add_parent_head_revision`. Treat a fourth migration name as a signal to
+re-verify this section.
+
+### Example rows
+
+Trunk and two stacked children, from the scratch repository:
 
 ```
-$ git show-ref | grep branch-metadata
-b6e255a6f6914a73cf5a394c85a502c0626ce66f refs/branch-metadata/main
+branch_name: main            parent_branch_name: NULL
+  parent_branch_revision: NULL   parent_head_revision: NULL
+  branch_revision: 1e430488…     validation_result: TRUNK
+  children: ["feat-a"]           state: NULL   last_submitted_version: NULL
 
-$ git cat-file -p b6e255a6f6914a73cf5a394c85a502c0626ce66f
-{
-  "children": ["os-579-add-tobiluqmd-as-a-dependency…", "fix/unify-oxfmt-config"],
-  "branchRevision": "fcbbea62e9777f2a0b8de3b7d5e98fad160a32fd",
-  "validationResult": "TRUNK"
-}
+branch_name: feat-a          parent_branch_name: main
+  parent_branch_revision: 1e430488…  parent_head_revision: 1e430488…
+  branch_revision: 1e430488…         validation_result: VALID
+  children: ["feat-b","feat-c"]      state: NULL   last_submitted_version: NULL
+
+branch_name: feat-b          parent_branch_name: feat-a
+  parent_branch_revision: 1e430488…  parent_head_revision: 1e430488…
+  branch_revision: 3d044850…         validation_result: VALID
+  children: []                       state: NULL   last_submitted_version: NULL
 ```
 
-Read the stack this way. Do not parse `gt` output.
+A child branch records its parent by name and by revision. A trunk row records
+neither.
 
-Observed fields:
+### Field semantics
 
-- `children` — the branch names stacked directly on this branch. This is the edge
-  set of the stack graph.
-- `branchRevision` — the head commit Graphite believes this branch is at.
-- `validationResult` — observed as `TRUNK` on trunk. The full range is unverified.
+- `branch_name` — primary key. The git branch name, not a ref path.
+- `parent_branch_name` — the branch this one is stacked on. `NULL` on trunk **and** on
+  a branch `gt` has seen but does not track.
+- `parent_branch_revision` — the parent commit this branch was last stacked onto. When
+  it differs from the parent's actual head, the branch needs a restack. `gt ls` prints
+  this as `(needs restack)`.
+- `parent_head_revision` — the parent's head as of `gt`'s last restack pass. Added by
+  migration `20260220`; may be `NULL` on rows written before it.
+- `branch_revision` — the head commit `gt` last observed for this branch.
+- `children` — JSON array of branch names. **Not authoritative.** 10 of 413 rows across
+  21 repositories disagree with the parent pointers, in both directions: `children`
+  naming a branch whose row points elsewhere, and a row whose parent does not list it.
+  Build the graph from `parent_branch_name` and report a `children` disagreement as a
+  finding.
+- `validation_result` — observed values: `TRUNK`, `VALID`, `BAD_PARENT_NAME`,
+  `BAD_PARENT_REVISION`, `INVALID_PARENT`, and `NULL`. `NULL` appears on rows written
+  before migration `20260212`, including on trunk rows. Do not treat this column as an
+  exhaustive enum; carry the raw string.
+- `state` — `NULL` in all 413 rows. What writes it is unverified.
+- `last_submitted_version` — JSON `{"headSha":…,"baseSha":…,"baseName":…}` or `NULL`.
+  Present only after `gt submit`.
 
-The set of branches with a `branch-metadata` ref is exactly the set Graphite
-tracks. In a repository with 8 git branches and 1 metadata ref, `gt ls` rendered 1
-branch. Untracked branches have no ref and do not appear.
+### A row is not proof of tracking
 
-### Unverified
-
-The blob shape on a **non-trunk** branch has not been observed. The only repository
-available at writing had a drained stack with one ref. Expect a parent branch name
-and revision. **Confirm this before designing around it.** Create a two-branch stack
-and read both refs.
+- `git checkout -b x` writes no row. Verified.
+- The next `gt` command in that repository inserts a row for `x` with
+  `parent_branch_name NULL` and `validation_result BAD_PARENT_NAME`. Verified.
+- `gt track x` sets `parent_branch_name` and `validation_result VALID`. Verified.
+- Treat a branch as tracked when `parent_branch_name` is non-`NULL`, or when its name
+  equals the `trunk` field of `.graphite_repo_config`.
+- MUST NOT treat `validation_result = 'TRUNK'` as the trunk test. Trunk rows with
+  `validation_result NULL` exist in 4 of 21 repositories.
 
 ### Derive staleness
 
-Compare `branchRevision` against the branch's actual head:
+The database is `gt`'s last observation, not the repository. Compare each row against
+git:
 
 ```sh
-git rev-parse <branch>
+git for-each-ref --format='%(refname:short) %(objectname)' refs/heads/
 ```
 
-If they differ, Graphite's recorded view is behind the repository. Neither `gt ls`
-nor `gt ll` prints this comparison.
+- `branch_revision` differs from the branch's actual head → `gt`'s recorded view is
+  behind the repository.
+- `parent_branch_revision` differs from the parent branch's actual head → the branch
+  needs a restack.
+
+`gt` refreshes `branch_revision` silently on **any** invocation, including `gt ls`.
+Verified: a raw `git commit` left `branch_revision 42eed4ce` against an actual head of
+`be6c1044`; running `gt ls` rewrote the row to `be6c1044` and printed nothing about it.
+A reader that never invokes `gt` is therefore the only thing that can observe this
+divergence — and invoking `gt` destroys the evidence.
+
+### Answers to the plan's open questions
+
+- **What does `validation_result` range over?** `TRUNK`, `VALID`, `BAD_PARENT_NAME`,
+  `BAD_PARENT_REVISION`, `INVALID_PARENT`, `NULL`. Observed, not exhaustive. Which
+  values mean "needs a restack" is **unverified**; `gt ls` derives `(needs restack)`
+  from the revision comparison above, not from this column — a branch reading `VALID`
+  printed `(needs restack)`.
+- **Does Graphite write metadata for a branch it tracks but has never submitted?** Yes.
+  A branch created with `gt create` and never submitted has a full row, with
+  `last_submitted_version NULL`.
+- **Does `gt` update `branch_revision` eagerly on `modify`?** Yes. `gt modify -a` wrote
+  the new head into the row in the same invocation.
+
+### Still unverified
+
+- What writes `state`, and what its values are.
+- Whether `gt` holds a write lock long enough to fail a concurrent read, and what it
+  does on a corrupt database.
+- The database's behavior across a `gt sync` that deletes merged branches: whether rows
+  are deleted or left orphaned.
+- Whether Graphite's own daemon or the VS Code extension writes to the same file.
 
 ## Do not shell out for worktree facts
 

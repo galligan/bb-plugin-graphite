@@ -18,7 +18,9 @@ Status: scaffolded, not implemented. The repository still contains the stock
 
 ## Invariants
 
-- Read stack topology from `refs/branch-metadata/*`. MUST NOT parse `gt` output.
+- Read stack topology from the Graphite metadata database at
+  `<git-common-dir>/.graphite_metadata.db`. MUST NOT parse `gt` output. MUST NOT read
+  `refs/branch-metadata/*`; those refs are obsolete as of Graphite CLI `1.8.6`.
 - Read branch, head SHA, and dirty state from `bb.sdk.environments.status`. MUST NOT
   shell out to `git status` or `git rev-parse` for facts that call already returns.
 - MUST NOT invoke `gt` in a form that can prompt. See the command reference in
