@@ -230,35 +230,45 @@ function StackBanner() {
   const state = stack.needsRestack ? "Needs restack" : stack.isStale ? "Drifted" : null;
 
   return (
+    // Structure copied from BB's own diff bar so the two rows share a baseline:
+    // a p-1 wrapper, then a min-h-6 px-2 py-1 button. That is what puts our icon
+    // at the same x as theirs and makes both cards the same height.
     <div className="text-xs text-muted-foreground">
-      <button
-        type="button"
-        onClick={() => setExpanded((open) => !open)}
-        aria-expanded={expanded}
-        className="flex w-full items-center gap-0.5 rounded-md p-1 text-left hover:text-foreground"
-      >
-        <StackPositionIcon
-          position={stack.placement}
-          className="mx-1 size-3.5 shrink-0"
-        />
-        <span className="shrink-0 tabular-nums">
-          {stack.position}/{stack.total}
-        </span>
-        {state !== null ? (
-          <span className="ml-1.5 shrink-0 text-warning-text">{state}</span>
-        ) : null}
-      </button>
+      <div className="flex items-center gap-0.5 p-1">
+        <button
+          type="button"
+          onClick={() => setExpanded((open) => !open)}
+          aria-expanded={expanded}
+          className="flex min-h-6 min-w-0 cursor-pointer items-center gap-1.5 overflow-hidden rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-state-hover"
+        >
+          <StackPositionIcon position={stack.placement} className="size-3.5 shrink-0" />
+          <span className="min-w-0 truncate tabular-nums">
+            {stack.position}/{stack.total}
+          </span>
+          {state !== null ? (
+            <span className="shrink-0 text-warning-text">{state}</span>
+          ) : null}
+          <Icon
+            name="ChevronDown"
+            className={cn(
+              "size-3.5 shrink-0 text-subtle-foreground transition-transform duration-200",
+              expanded && "rotate-180",
+            )}
+          />
+        </button>
+      </div>
       {expanded ? (
-        <ol className="border-t border-border px-2 py-1.5">
+        // Tip first, the way `gt ls` prints it. Indented to the icon column.
+        <ol className="border-t border-border p-1">
           {[...stack.branches].reverse().map((branch) => (
             <li
               key={branch.name}
               className={cn(
-                "flex items-center gap-2 py-0.5",
+                "flex items-center gap-1.5 px-2 py-0.5",
                 branch.isCurrent && "text-foreground",
               )}
             >
-              <span className="truncate font-mono">{branch.name}</span>
+              <span className="min-w-0 truncate font-mono">{branch.name}</span>
               {branch.needsRestack ? (
                 <span className="shrink-0 text-warning-text">needs restack</span>
               ) : null}
