@@ -11,9 +11,19 @@
 // `npm install` once before `bb plugin build`.
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { definePluginApp, useBbContext, useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
+import {
+  definePluginApp,
+  useBbContext,
+  useBbNavigate,
+  useRealtime,
+  useRpc,
+} from "@get-bb/plugin-sdk/app";
 import type { rpcContract, Todo } from "./server";
-import type { CurrentStack, CurrentStackBranch } from "./lib/current-stack.ts";
+import type {
+  CurrentStack,
+  CurrentStackBranch,
+  CurrentStackThread,
+} from "./lib/current-stack.ts";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Icon } from "@/components/ui/icon";
@@ -299,8 +309,36 @@ function StackRow({
 
   return (
     <li>
+      {/* Offshoots sit above the branch they hang off, the way `gt ls` stacks them,
+          so the parent's row is where the columns join. */}
+      {open
+        ? branch.offshoots.map((offshoot) => (
+            <div
+              key={offshoot.name}
+              className="grid grid-cols-[0.875rem_auto_minmax(0,1fr)] items-center gap-x-1.5 rounded px-2"
+            >
+              <LineageNode first={first} last={last} current={false} passthrough />
+              <span
+                className="flex items-center"
+                style={{ paddingLeft: `${(offshoot.column - 1) * 14}px` }}
+              >
+                <OffshootNode />
+              </span>
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="truncate text-xs leading-5 opacity-55">{offshoot.name}</span>
+                {offshoot.needsRestack ? <RestackMark /> : null}
+                <ThreadMarks threads={offshoot.threads} />
+              </span>
+            </div>
+          ))
+        : null}
       <div className="grid grid-cols-[0.875rem_auto_minmax(0,1fr)] items-center gap-x-1.5 rounded px-2">
-        <LineageNode first={first} last={last} current={branch.isCurrent} />
+        <LineageNode
+          first={first}
+          last={last}
+          current={branch.isCurrent}
+          join={open && branch.offshoots.length > 0}
+        />
         <span
           className={cn(
             "truncate text-xs leading-5",
@@ -311,6 +349,7 @@ function StackRow({
         </span>
         <span className="flex items-center gap-1.5">
           {branch.needsRestack ? <RestackMark /> : null}
+          <ThreadMarks threads={branch.threads} />
           {count > 0 ? (
             <button
               type="button"
@@ -328,28 +367,35 @@ function StackRow({
           ) : null}
         </span>
       </div>
-      {open
-        ? branch.offshoots.map((offshoot) => (
-            <div
-              key={offshoot.name}
-              className="grid grid-cols-[0.875rem_auto_minmax(0,1fr)] items-center gap-x-1.5 rounded px-2"
-            >
-              {/* The spine keeps running past an offshoot; the offshoot hangs off it. */}
-              <LineageNode first={first} last={last} current={false} passthrough />
-              <span
-                className="flex items-center"
-                style={{ paddingLeft: `${(offshoot.column - 1) * 14}px` }}
-              >
-                <OffshootNode />
-              </span>
-              <span className="flex min-w-0 items-center gap-1.5">
-                <span className="truncate text-xs leading-5 opacity-55">{offshoot.name}</span>
-                {offshoot.needsRestack ? <RestackMark /> : null}
-              </span>
-            </div>
-          ))
-        : null}
     </li>
+  );
+}
+
+/**
+ * A thread working on this branch. Hover names it, click opens it.
+ * `gt ls` prints the worktree path here; a thread is the thing you actually want.
+ */
+function ThreadMarks({ threads }: { readonly threads: CurrentStackThread[] }) {
+  const navigate = useBbNavigate();
+  if (threads.length === 0) return null;
+  return (
+    <span className="flex shrink-0 items-center gap-0.5">
+      {threads.map((thread) => (
+        <button
+          key={thread.id}
+          type="button"
+          title={thread.title}
+          aria-label={`Open thread: ${thread.title}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            navigate.toThread(thread.id);
+          }}
+          className="flex cursor-pointer items-center rounded p-0.5 text-subtle-foreground transition-colors hover:bg-state-hover hover:text-foreground"
+        >
+          <Icon name="MessageSquare" className="size-3" />
+        </button>
+      ))}
+    </span>
   );
 }
 
@@ -386,11 +432,14 @@ function LineageNode({
   last,
   current,
   passthrough = false,
+  join = false,
 }: {
   readonly first: boolean;
   readonly last: boolean;
   readonly current: boolean;
   readonly passthrough?: boolean;
+  /** Draw the elbow that closes an offshoot column into this node, like `◯─┘`. */
+  readonly join?: boolean;
 }) {
   // The line stops short of each node rather than passing behind it, so a hollow
   // node reads as a ring and not as a crossed-out circle.
@@ -406,6 +455,15 @@ function LineageNode({
           {last ? null : (
             <line x1="7" y1="14.5" x2="7" y2="20" stroke="currentColor" strokeWidth="1" opacity="0.3" />
           )}
+          {join ? (
+            <path
+              d="M10.25 10H14"
+              stroke="currentColor"
+              strokeWidth="1"
+              opacity="0.3"
+              fill="none"
+            />
+          ) : null}
           <circle
             cx="7"
             cy="10"

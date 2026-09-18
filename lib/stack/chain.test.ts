@@ -112,7 +112,7 @@ describe("stackChain", () => {
     assert.ok(chain.total <= 2);
   });
 
-  it("keeps a straight offshoot run in one column and opens a new one per fork", () => {
+  it("lists offshoot descendants before the branch they join, as `gt ls` does", () => {
     const forked = snapshot([
       record("main", null),
       record("a", "main"),
@@ -127,12 +127,14 @@ describe("stackChain", () => {
       record("z1", "main"),
     ]);
     const chainNames = new Set(stackChain(forked, "b")!.branches.map((branch) => branch.name));
+    // A straight run stays in one column however long; only a fork opens the next.
+    // Each branch is listed after its descendants, so it renders below them.
     assert.deepEqual(
       stackOffshoots(forked, chainNames, "a").map((o) => [o.name, o.column]),
       [
-        ["x1", 1],
-        ["x2", 1],
         ["x3", 1],
+        ["x2", 1],
+        ["x1", 1],
         ["y1", 2],
       ],
     );

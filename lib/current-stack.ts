@@ -15,12 +15,19 @@ export interface CurrentStackRequest {
 
 // Wire shapes. Plain data, so they match the RPC contract's inferred types
 // without a cast; the readonly discipline lives in lib/stack/.
+/** A BB thread whose environment has this branch checked out. */
+export interface CurrentStackThread {
+  id: string;
+  title: string;
+}
+
 export interface CurrentStackOffshoot {
   name: string;
   /** Divergence column, 1 for the first line off the branch. Not generation depth. */
   column: number;
   needsRestack: boolean;
   isStale: boolean;
+  threads: CurrentStackThread[];
 }
 
 export interface CurrentStackBranch {
@@ -28,6 +35,7 @@ export interface CurrentStackBranch {
   isCurrent: boolean;
   needsRestack: boolean;
   isStale: boolean;
+  threads: CurrentStackThread[];
   /** Branches growing out of this one that the chain does not run through. */
   offshoots: CurrentStackOffshoot[];
 }
@@ -88,6 +96,26 @@ export async function currentStack(
 
   const inChain = new Set(chain.branches.map((branch) => branch.name));
 
+  // Which thread is working on which branch — the join neither tool has alone.
+  // Graphite cannot see BB's threads; BB does not know the branches form a stack.
+  const byBranch = new Map<string, CurrentStackThread[]>();
+  const environmentBranch = new Map<string, string>();
+  for (const environment of environments) {
+    if (environment.branchName !== null) environmentBranch.set(environment.id, environment.branchName);
+  }
+  if (environmentBranch.size > 0) {
+    const threads = await bb.sdk.threads.list({ projectId: request.projectId, limit: 200 });
+    for (const thread of threads) {
+      const branchName = thread.environmentId === null ? undefined : environmentBranch.get(thread.environmentId);
+      if (branchName === undefined) continue;
+      const entry = { id: thread.id, title: thread.title ?? thread.titleFallback ?? "Untitled thread" };
+      const existing = byBranch.get(branchName);
+      if (existing === undefined) byBranch.set(branchName, [entry]);
+      else existing.push(entry);
+    }
+  }
+  const threadsFor = (name: string): CurrentStackThread[] => byBranch.get(name) ?? [];
+
   return {
     outcome: "stacked",
     branch: checkout.branchName,
@@ -102,7 +130,11 @@ export async function currentStack(
       isCurrent: branch.name === checkout.branchName,
       needsRestack: branch.needsRestack,
       isStale: branch.isStale,
-      offshoots: stackOffshoots(snapshot, inChain, branch.name),
+      threads: threadsFor(branch.name),
+      offshoots: stackOffshoots(snapshot, inChain, branch.name).map((offshoot) => ({
+        ...offshoot,
+        threads: threadsFor(offshoot.name),
+      })),
     })),
   };
 }

@@ -109,26 +109,31 @@ export function stackOffshoots(
 ): StackOffshoot[] {
   const byName = new Map(snapshot.branches.map((branch) => [branch.name, branch]));
   const inCycle = new Set(snapshot.cycles.flat());
-  const out: StackOffshoot[] = [];
   const seen = new Set<string>([branchName]);
+  const out: StackOffshoot[] = [];
 
+  // Post-order: a branch's descendants are listed before it, so every row sits
+  // above the row it joins. That is the order `gt ls` prints, and it is what makes
+  // a column readable — the node closing a column appears directly under the run
+  // it closes.
   const walk = (name: string, column: number): void => {
     const branch = byName.get(name);
     if (branch === undefined || seen.has(name) || inCycle.has(name)) return;
     seen.add(name);
+    // The first child continues this column; each extra child opens the next one.
+    branch.children.forEach((child, index) => walk(child, column + index));
     out.push({
       name,
       column,
       needsRestack: branch.needsRestack,
       isStale: branch.isStale,
     });
-    // The first child continues this column; each extra child opens the next one.
-    branch.children.forEach((child, index) => walk(child, column + index));
   };
 
   const start = byName.get(branchName);
   if (start === undefined) return out;
-  const offshootChildren = start.children.filter((child) => !chainNames.has(child));
-  offshootChildren.forEach((child, index) => walk(child, 1 + index));
+  start.children
+    .filter((child) => !chainNames.has(child))
+    .forEach((child, index) => walk(child, 1 + index));
   return out;
 }
