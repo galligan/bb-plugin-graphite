@@ -8,6 +8,21 @@
 
 import type { StackBranch, StackSnapshot } from "./types.ts";
 
+/**
+ * A branch hanging off the chain rather than on it.
+ *
+ * `column` counts divergences, not generations, the way `gt ls` draws them: a
+ * straight run of branches stays in one column however long it is, and only a
+ * fork opens another. Indenting by generation turns a linear five-branch offshoot
+ * into a staircase that implies a structure the repository does not have.
+ */
+export interface StackOffshoot {
+  readonly name: string;
+  readonly column: number;
+  readonly needsRestack: boolean;
+  readonly isStale: boolean;
+}
+
 export interface StackChain {
   /** Root first, deepest descendant last. Always contains `branch`. */
   readonly branches: readonly StackBranch[];
@@ -77,4 +92,43 @@ export function stackChain(
     needsRestack: atOrBelow.some((branch) => branch.needsRestack),
     isStale: branches.some((branch) => branch.isStale),
   };
+}
+
+/**
+ * Everything growing out of `branchName` that the chain itself does not pass
+ * through, flattened depth-first with the depth needed to indent it.
+ *
+ * `gt ls` draws these as extra columns joined by `┘`. Without them a stack looks
+ * linear when it is not: in ~/Developer/outfitter/skillset the branch the chain
+ * runs through carries five more branches nobody could see.
+ */
+export function stackOffshoots(
+  snapshot: StackSnapshot,
+  chainNames: ReadonlySet<string>,
+  branchName: string,
+): StackOffshoot[] {
+  const byName = new Map(snapshot.branches.map((branch) => [branch.name, branch]));
+  const inCycle = new Set(snapshot.cycles.flat());
+  const out: StackOffshoot[] = [];
+  const seen = new Set<string>([branchName]);
+
+  const walk = (name: string, column: number): void => {
+    const branch = byName.get(name);
+    if (branch === undefined || seen.has(name) || inCycle.has(name)) return;
+    seen.add(name);
+    out.push({
+      name,
+      column,
+      needsRestack: branch.needsRestack,
+      isStale: branch.isStale,
+    });
+    // The first child continues this column; each extra child opens the next one.
+    branch.children.forEach((child, index) => walk(child, column + index));
+  };
+
+  const start = byName.get(branchName);
+  if (start === undefined) return out;
+  const offshootChildren = start.children.filter((child) => !chainNames.has(child));
+  offshootChildren.forEach((child, index) => walk(child, 1 + index));
+  return out;
 }

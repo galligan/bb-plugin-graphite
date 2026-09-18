@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { buildStack } from "./graph.ts";
-import { stackChain } from "./chain.ts";
+import { stackChain, stackOffshoots } from "./chain.ts";
 import type { BranchRecord } from "./metadata.ts";
 import type { StackSnapshot } from "./types.ts";
 
@@ -110,6 +110,36 @@ describe("stackChain", () => {
     const chain = stackChain(cyclic, "x");
     assert.ok(chain);
     assert.ok(chain.total <= 2);
+  });
+
+  it("keeps a straight offshoot run in one column and opens a new one per fork", () => {
+    const forked = snapshot([
+      record("main", null),
+      record("a", "main"),
+      record("b", "a"),
+      // A straight run off `a`: three branches, one column.
+      record("x1", "a"),
+      record("x2", "x1"),
+      record("x3", "x2"),
+      // A second line off `a`: the next column.
+      record("y1", "a"),
+      // A third off trunk.
+      record("z1", "main"),
+    ]);
+    const chainNames = new Set(stackChain(forked, "b")!.branches.map((branch) => branch.name));
+    assert.deepEqual(
+      stackOffshoots(forked, chainNames, "a").map((o) => [o.name, o.column]),
+      [
+        ["x1", 1],
+        ["x2", 1],
+        ["x3", 1],
+        ["y1", 2],
+      ],
+    );
+    assert.deepEqual(
+      stackOffshoots(forked, chainNames, "main").map((o) => o.name),
+      ["z1"],
+    );
   });
 
   it("returns null for a branch Graphite does not track", () => {

@@ -13,7 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { definePluginApp, useBbContext, useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
 import type { rpcContract, Todo } from "./server";
-import type { CurrentStack } from "./lib/current-stack.ts";
+import type { CurrentStack, CurrentStackBranch } from "./lib/current-stack.ts";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Icon } from "@/components/ui/icon";
@@ -230,7 +230,6 @@ function StackBanner() {
   const state = stack.needsRestack ? "Needs restack" : stack.isStale ? "Drifted" : null;
   // Tip first, the way `gt ls` prints it: trunk is the last line, not the first.
   const rows = [...stack.branches].reverse();
-  const trunkName = stack.branches[0]?.name ?? "trunk";
 
   return (
     // Structure copied from BB's own diff bar so the two rows share a baseline:
@@ -271,48 +270,114 @@ function StackBanner() {
         <div className="overflow-hidden rounded-b-[7px] bg-popover">
           <ol className="max-h-72 overflow-auto p-1">
             {rows.map((branch, index) => (
-              <li
+              <StackRow
                 key={branch.name}
-                className="grid grid-cols-[0.875rem_minmax(0,1fr)_auto] items-center gap-x-1.5 rounded px-2"
-              >
-                <LineageNode
-                  first={index === 0}
-                  last={index === rows.length - 1}
-                  current={branch.isCurrent}
-                />
-                <span
-                  className={cn(
-                    "truncate text-xs leading-5",
-                    branch.isCurrent
-                      ? "font-medium text-foreground"
-                      : "opacity-70",
-                  )}
-                >
-                  {branch.name}
-                </span>
-                {branch.needsRestack ? (
-                  <span className="shrink-0 text-xs leading-5 text-warning-text">
-                    needs restack
-                  </span>
-                ) : null}
-              </li>
+                branch={branch}
+                first={index === 0}
+                last={index === rows.length - 1}
+              />
             ))}
           </ol>
-          {stack.otherStacks.length > 0 ? (
-            <p className="border-t border-border px-3 py-1.5 text-xs leading-5 text-subtle-foreground">
-              {stack.otherStacks.length} other stack
-              {stack.otherStacks.length === 1 ? "" : "s"} off{" "}
-              <span className="font-mono">{trunkName}</span>
-            </p>
-          ) : null}
         </div>
       </div>
     </div>
   );
 }
 
+/** One branch on the spine, plus its offshoots when they are shown. */
+function StackRow({
+  branch,
+  first,
+  last,
+}: {
+  readonly branch: CurrentStackBranch;
+  readonly first: boolean;
+  readonly last: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const count = branch.offshoots.length;
+
+  return (
+    <li>
+      <div className="grid grid-cols-[0.875rem_auto_minmax(0,1fr)] items-center gap-x-1.5 rounded px-2">
+        <LineageNode first={first} last={last} current={branch.isCurrent} />
+        <span
+          className={cn(
+            "truncate text-xs leading-5",
+            branch.isCurrent ? "font-medium text-foreground" : "opacity-70",
+          )}
+        >
+          {branch.name}
+        </span>
+        <span className="flex items-center gap-1.5">
+          {branch.needsRestack ? <RestackMark /> : null}
+          {count > 0 ? (
+            <button
+              type="button"
+              onClick={() => setOpen((value) => !value)}
+              aria-expanded={open}
+              aria-label={`${count} branch${count === 1 ? "" : "es"} off ${branch.name}`}
+              className="flex cursor-pointer items-center gap-0.5 rounded px-1 text-2xs leading-4 text-subtle-foreground transition-colors hover:bg-state-hover hover:text-foreground"
+            >
+              <Icon
+                name="ChevronRight"
+                className={cn("size-3 transition-transform duration-150", open && "rotate-90")}
+              />
+              {count}
+            </button>
+          ) : null}
+        </span>
+      </div>
+      {open
+        ? branch.offshoots.map((offshoot) => (
+            <div
+              key={offshoot.name}
+              className="grid grid-cols-[0.875rem_auto_minmax(0,1fr)] items-center gap-x-1.5 rounded px-2"
+            >
+              {/* The spine keeps running past an offshoot; the offshoot hangs off it. */}
+              <LineageNode first={first} last={last} current={false} passthrough />
+              <span
+                className="flex items-center"
+                style={{ paddingLeft: `${(offshoot.column - 1) * 14}px` }}
+              >
+                <OffshootNode />
+              </span>
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="truncate text-xs leading-5 opacity-55">{offshoot.name}</span>
+                {offshoot.needsRestack ? <RestackMark /> : null}
+              </span>
+            </div>
+          ))
+        : null}
+    </li>
+  );
+}
+
+/** A branch on an offshoot column: its own ring, no spine of its own. */
+function OffshootNode() {
+  return (
+    <svg viewBox="0 0 14 20" className="h-5 w-3.5 shrink-0" aria-hidden="true">
+      <circle cx="7" cy="10" r="2.75" fill="none" stroke="currentColor" strokeWidth="1.25" opacity="0.4" />
+    </svg>
+  );
+}
+
+/** Orange mark beside a branch name. Replaces the "needs restack" text on every row. */
+function RestackMark() {
+  return (
+    <span
+      title="Needs restack"
+      aria-label="Needs restack"
+      role="img"
+      className="flex size-3.5 shrink-0 items-center justify-center rounded-full border border-warning-text text-2xs font-semibold leading-none text-warning-text"
+    >
+      !
+    </span>
+  );
+}
+
 /**
- * One node on the stack spine, in the 1.5rem column BB reserves for a row glyph.
+ * One node on the stack spine, in the icon column BB reserves for a row glyph.
  * Reads like `gt ls`: a filled node for the branch you are on, hollow for the rest,
  * joined by a continuous line so the lineage is visible rather than implied.
  */
@@ -320,30 +385,38 @@ function LineageNode({
   first,
   last,
   current,
+  passthrough = false,
 }: {
   readonly first: boolean;
   readonly last: boolean;
   readonly current: boolean;
+  readonly passthrough?: boolean;
 }) {
+  // The line stops short of each node rather than passing behind it, so a hollow
+  // node reads as a ring and not as a crossed-out circle.
   return (
-    // The line stops short of each node rather than passing behind it, so a hollow
-    // node reads as a ring and not as a crossed-out circle.
     <svg viewBox="0 0 14 20" className="h-5 w-3.5 shrink-0" aria-hidden="true">
-      {first ? null : (
-        <line x1="7" y1="0" x2="7" y2="5.5" stroke="currentColor" strokeWidth="1" opacity="0.3" />
+      {passthrough ? (
+        <line x1="7" y1="0" x2="7" y2="20" stroke="currentColor" strokeWidth="1" opacity="0.3" />
+      ) : (
+        <>
+          {first ? null : (
+            <line x1="7" y1="0" x2="7" y2="5.5" stroke="currentColor" strokeWidth="1" opacity="0.3" />
+          )}
+          {last ? null : (
+            <line x1="7" y1="14.5" x2="7" y2="20" stroke="currentColor" strokeWidth="1" opacity="0.3" />
+          )}
+          <circle
+            cx="7"
+            cy="10"
+            r="3.25"
+            fill={current ? "currentColor" : "none"}
+            stroke="currentColor"
+            strokeWidth="1.25"
+            opacity={current ? 1 : 0.55}
+          />
+        </>
       )}
-      {last ? null : (
-        <line x1="7" y1="14.5" x2="7" y2="20" stroke="currentColor" strokeWidth="1" opacity="0.3" />
-      )}
-      <circle
-        cx="7"
-        cy="10"
-        r="3.25"
-        fill={current ? "currentColor" : "none"}
-        stroke="currentColor"
-        strokeWidth="1.25"
-        opacity={current ? 1 : 0.55}
-      />
     </svg>
   );
 }

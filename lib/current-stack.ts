@@ -5,7 +5,7 @@
 
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 
-import { readStack, StackReadError, stackChain } from "./stack/index.ts";
+import { readStack, StackReadError, stackChain, stackOffshoots } from "./stack/index.ts";
 
 export interface CurrentStackRequest {
   readonly projectId: string;
@@ -15,11 +15,21 @@ export interface CurrentStackRequest {
 
 // Wire shapes. Plain data, so they match the RPC contract's inferred types
 // without a cast; the readonly discipline lives in lib/stack/.
+export interface CurrentStackOffshoot {
+  name: string;
+  /** Divergence column, 1 for the first line off the branch. Not generation depth. */
+  column: number;
+  needsRestack: boolean;
+  isStale: boolean;
+}
+
 export interface CurrentStackBranch {
   name: string;
   isCurrent: boolean;
   needsRestack: boolean;
   isStale: boolean;
+  /** Branches growing out of this one that the chain does not run through. */
+  offshoots: CurrentStackOffshoot[];
 }
 
 export type CurrentStack =
@@ -33,8 +43,6 @@ export type CurrentStack =
       isStale: boolean;
       workingTree: string | null;
       branches: CurrentStackBranch[];
-      /** Tips of other stacks rooted on trunk. Context, not the subject. */
-      otherStacks: string[];
     }
   /** No stack to show: not a Graphite repo, branch untracked, or no environment. */
   | { outcome: "none"; reason: string };
@@ -78,10 +86,7 @@ export async function currentStack(
   const chain = stackChain(snapshot, checkout.branchName);
   if (chain === null) return none("branch is not tracked by Graphite");
 
-  // Other lines off trunk: sibling children of trunk that this chain does not use.
   const inChain = new Set(chain.branches.map((branch) => branch.name));
-  const trunkBranch = snapshot.branches.find((branch) => branch.isTrunk);
-  const otherStacks = (trunkBranch?.children ?? []).filter((name) => !inChain.has(name));
 
   return {
     outcome: "stacked",
@@ -97,7 +102,7 @@ export async function currentStack(
       isCurrent: branch.name === checkout.branchName,
       needsRestack: branch.needsRestack,
       isStale: branch.isStale,
+      offshoots: stackOffshoots(snapshot, inChain, branch.name),
     })),
-    otherStacks,
   };
 }
