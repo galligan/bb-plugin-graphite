@@ -2,8 +2,7 @@
 
 Read and drive [Graphite](https://graphite.dev) stacks from BB.
 
-> **Status: scaffolded, not implemented.** Nothing below works yet. This README
-> describes the intended shape so the build has a target.
+> **Status: the read path and the write verbs work.** Not yet released.
 
 ## Why
 
@@ -12,6 +11,17 @@ work is currently driven by hand in a terminal, which means an agent coordinatin
 stack has to shell out, parse human-readable output, and guess at state.
 
 ## What it does
+
+## What works
+
+```sh
+bb graphite stack            # the stack around the checked-out branch
+bb graphite stack --json     # the same snapshot, for agents
+bb graphite restack | submit | sync | merge
+```
+
+Plus a `graphite_stack` agent tool and a row above the composer showing where the
+branch sits, what needs a restack, and which thread is on each branch.
 
 **Reads the stack from stored state, not from CLI output.** Graphite keeps its
 topology in a SQLite database inside your git directory, so the stack graph, each
@@ -37,8 +47,8 @@ bb graphite stack            # the current stack, with head, state, and stalenes
 bb graphite stack --json     # the same snapshot, for agents
 ```
 
-Write verbs land after the read path is proven. See
-[`.agents/plans/20260918-init/`](.agents/plans/20260918-init/).
+Every write verb refuses a working tree that is not `clean` unless you pass
+`--force`. See [`.agents/plans/20260918-init/`](.agents/plans/20260918-init/).
 
 ## What it couples to
 

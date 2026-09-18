@@ -1,5 +1,11 @@
 # 20260918-init — first working slice
 
+**State (2026-09-18):** steps 1–5 are built. What the plan did not anticipate is the
+composer banner, which grew out of step 4 and now carries the lineage view. What it
+still calls for and has not been done: running each write verb against a real remote
+(`submit` and `merge` have not been exercised past the guard), and the multi-machine
+`bb.host` path, still a documented limitation.
+
 Goal: a read-only Graphite stack view, exposed as a CLI command and an agent tool,
 proven against a real two-branch stack.
 

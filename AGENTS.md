@@ -2,8 +2,15 @@
 
 `bb-plugin-graphite` reads and drives Graphite stacks from BB.
 
-Status: scaffolded, not implemented. The repository still contains the stock
-`bb plugin new` todo example. Replace it; do not build around it.
+Status: the read path is built and the write verbs are in. The stock `bb plugin new`
+todo example is gone.
+
+- `lib/stack/` — pure reader over Graphite's metadata. No BB SDK, no `gt`, unit
+  tested without a daemon.
+- `lib/current-stack.ts` — the only place the SDK and the reader meet.
+- `lib/gt.ts`, `lib/verbs.ts` — the write path and the guard in front of it.
+- `server.ts` — the RPC, `bb graphite …`, and the `graphite_stack` agent tool.
+- `app.tsx`, `components/stack/` — the composer banner.
 
 ## Read first
 
@@ -37,7 +44,9 @@ Status: scaffolded, not implemented. The repository still contains the stock
 - State what is verified and what is not. When a fact comes from a specific version,
   name the version.
 - Prefer a CLI command over a UI panel until a decision exists that a human cannot
-  make from `--json` output.
+  make from `--json` output. The stack banner earns its place: position and lineage
+  are not readable from a JSON array.
+- Keep a surface thin. Anything a second surface could want belongs in `lib/`.
 
 ## Verification
 
