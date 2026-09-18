@@ -31,7 +31,13 @@ export const STACK_LAYER_PATHS: Readonly<Record<StackPosition, string>> = {
     "C8.16582 12.9171 7.83444 12.9171 7.55292 12.7764L3.00007 10.4999Z",
 };
 
-export const STACK_DIM_OPACITY = 0.4;
+/**
+ * Graphite draws the inactive plates at 0.4, where the mark is a primary glyph at
+ * full colour. Ours sits in muted composer chrome beside Hugeicons strokes, and a
+ * filled mark carries far more ink than a stroked one — 0.4 read as a dark block
+ * next to BB's own icons. 0.25 matches their weight and keeps the active plate clear.
+ */
+export const STACK_DIM_OPACITY = 0.25;
 
 /** Accessible label for a branch's place in its stack. */
 export function stackPositionLabel(position: StackPosition): string {
