@@ -5,6 +5,23 @@ the live instance.
 
 Verified 2026-09-18 against BB `0.43.1`.
 
+## One command
+
+```sh
+scripts/bb-test-instance.sh start      # launch, wait for ready, print the exports
+scripts/bb-test-instance.sh install    # build this plugin and install it there
+scripts/bb-test-instance.sh run <...>  # run one bb command against it
+scripts/bb-test-instance.sh status
+scripts/bb-test-instance.sh stop
+```
+
+- `start` is idempotent and refuses a port already in use.
+- `run` needs no exported variables, so it works the same in fish.
+- To bind a bash or zsh shell instead: `eval "$(scripts/bb-test-instance.sh env)"`.
+- Override with `BB_TEST_DATA_DIR`, `BB_TEST_SERVER_PORT`, `BB_TEST_DAEMON_PORT`.
+
+The rest of this file records what the script does and why, for when it breaks.
+
 ## Launch an isolated instance
 
 The installed desktop app ships a headless entrypoint. Use it — it is the same
