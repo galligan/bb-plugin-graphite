@@ -33,7 +33,12 @@ todo example is gone.
 - MUST NOT invoke `gt` in a form that can prompt. See the command reference in
   `docs/agents/graphite.md`.
 - MUST NOT run a destructive `gt` or `git` operation without first checking
-  `environments.status` and refusing on a non-`clean` working tree.
+  `environments.status`. Refuse when `workspace.workingTree.state` is
+  `dirty_uncommitted`, `committed_unmerged`, or `dirty_and_committed_unmerged`, and
+  when it is a state this list does not name. Allow `clean` and `untracked`.
+  A rebase does not touch untracked files, and refusing there only teaches the
+  operator that `--force` is routine. The predicate is `blocksWrite` in
+  `lib/verbs.ts`.
 - Resolve the `gt` binary path. Do not assume it is on the server process's `PATH`.
 
 ## Conventions

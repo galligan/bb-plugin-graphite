@@ -1,6 +1,6 @@
 // The write path: `gt` verbs with the guard in front of them.
 //
-// Every verb refuses on a working tree that is not clean. That is the hazard
+// Every verb refuses on a working tree that could lose work. That is the hazard
 // `bb-plugin-dev` names — a restack or a sync over uncommitted work is not
 // recoverable from inside BB — and the check comes from `environments.status`,
 // never from a git call of our own.
@@ -11,6 +11,25 @@ import { resolveEnvironment, type CurrentStackRequest } from "./current-stack.ts
 import { runGt } from "./gt.ts";
 
 export type VerbName = "restack" | "submit" | "sync" | "merge";
+
+/**
+ * Working-tree states a write verb may run on. Everything else is refused,
+ * including a state BB has not shipped yet: an allow-list fails closed, and a
+ * guard that fails open on a name it does not recognise is not a guard.
+ *
+ * `untracked` is deliberately safe. A rebase does not touch untracked files, and
+ * the one adjacent failure — an incoming commit wanting to write to an untracked
+ * path — git aborts on itself before touching anything. Refusing there would fire
+ * the guard where nothing can be lost, which teaches the operator that `--force`
+ * is routine; by the time a genuinely dirty tree appears, `--force` is already a
+ * reflex. A guard that cries wolf manufactures the habit that defeats it.
+ */
+const SAFE_STATES: ReadonlySet<string> = new Set(["clean", "untracked"]);
+
+/** True when a write verb must refuse this working-tree state. */
+export function blocksWrite(workingTree: string): boolean {
+  return !SAFE_STATES.has(workingTree);
+}
 
 export interface VerbRequest extends CurrentStackRequest {
   readonly verb: VerbName;
@@ -41,7 +60,7 @@ export async function runVerb(bb: BbPluginApi, request: VerbRequest): Promise<Ve
   }
   const environment = resolution.environment;
 
-  if (environment.workingTree !== "clean" && request.force !== true) {
+  if (blocksWrite(environment.workingTree) && request.force !== true) {
     return {
       outcome: "refused",
       reason:

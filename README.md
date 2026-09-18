@@ -47,8 +47,13 @@ bb graphite stack            # the current stack, with head, state, and stalenes
 bb graphite stack --json     # the same snapshot, for agents
 ```
 
-Every write verb refuses a working tree that is not `clean` unless you pass
-`--force`. See [`.agents/plans/20260918-init/`](.agents/plans/20260918-init/).
+Every write verb refuses a working tree that could lose work —
+`dirty_uncommitted`, `committed_unmerged`, `dirty_and_committed_unmerged`, or a
+state it does not recognise — unless you pass `--force`. `clean` and `untracked`
+proceed.
+
+**Not yet exercised:** `submit` and `merge` have been run only as far as the guard.
+Neither has touched a real remote. Treat the first real use as deliberate. See [`.agents/plans/20260918-init/`](.agents/plans/20260918-init/).
 
 ## What it couples to
 

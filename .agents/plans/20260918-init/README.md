@@ -2,9 +2,20 @@
 
 **State (2026-09-18):** steps 1–5 are built. What the plan did not anticipate is the
 composer banner, which grew out of step 4 and now carries the lineage view. What it
-still calls for and has not been done: running each write verb against a real remote
-(`submit` and `merge` have not been exercised past the guard), and the multi-machine
-`bb.host` path, still a documented limitation.
+still calls for and has not been done:
+
+- `submit` and `merge` against a real remote. Both are exercised only to the guard;
+  neither has pushed or merged anything. Deliberately so — the first real run should
+  be observed, not a checkbox.
+- `restack` and `sync` have run against the scratch stack, on a clean tree, on an
+  untracked tree, and against the refusal path.
+- The multi-machine `bb.host` path. `lib/stack/` is kept free of SDK imports so it
+  can move into a host entry; the entry is not built, and should not be on
+  speculation.
+- The banner's hover pill was verified once by DOM inspection and one screenshot,
+  not by an automated check. The lineage columns and elbows were compared against
+  `gt ls` on a scratch stack with two columns and a nested fork. No UI is covered
+  by tests.
 
 Goal: a read-only Graphite stack view, exposed as a CLI command and an agent tool,
 proven against a real two-branch stack.
