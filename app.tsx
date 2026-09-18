@@ -11,13 +11,18 @@
 // `npm install` once before `bb plugin build`.
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { definePluginApp, useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
+import { definePluginApp, useBbContext, useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
 import type { rpcContract, Todo } from "./server";
+import type { CurrentStack } from "./lib/current-stack.ts";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import {
+  StackPositionIcon,
+  STACK_ICON_REGISTRATIONS,
+} from "@/components/icons/stack-position.tsx";
 
 /** The todo list, kept current by the server's "todos-changed" signal. */
 function useTodos() {
@@ -185,7 +190,62 @@ function TodosPage() {
 // other UI under app.slots and composer actions, plus-menu rows, banners, or
 // rich-text rules with app.composer.customize(...) (see the bb guide's
 // plugins chapter).
+
+/**
+ * The quiet default: one line above the composer, only when there is a stack to
+ * report. The banner region collapses when this renders null, so an unstacked
+ * branch costs no vertical space at all.
+ */
+function StackBanner() {
+  const rpc = useRpc<typeof rpcContract>();
+  const { projectId, threadId } = useBbContext();
+  const [stack, setStack] = useState<CurrentStack | null>(null);
+
+  useEffect(() => {
+    if (projectId === null) {
+      setStack(null);
+      return;
+    }
+    let live = true;
+    rpc.call("stack_current", { projectId, threadId }).then(
+      (result) => {
+        if (live) setStack(result);
+      },
+      () => {
+        if (live) setStack(null);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [rpc, projectId, threadId]);
+
+  if (stack === null || stack.outcome !== "stacked") return null;
+
+  const state = stack.needsRestack ? "needs restack" : stack.isStale ? "drifted" : null;
+
+  return (
+    // The branch name is already in the composer footer. Repeating it would make
+    // this row a second copy of a fact BB shows; it earns its place by carrying
+    // only what nothing else does — where in the stack, and whether it has drifted.
+    <div className="flex min-w-0 items-center gap-1.5 px-1 text-xs text-muted-foreground">
+      <StackPositionIcon position={stack.placement} className="size-3.5 shrink-0" />
+      <span className="shrink-0 tabular-nums">
+        {stack.position} of {stack.total}
+      </span>
+      {state !== null ? (
+        <span className="shrink-0 text-subtle-foreground">· {state}</span>
+      ) : null}
+    </div>
+  );
+}
+
 export default definePluginApp((app) => {
+  for (const icon of STACK_ICON_REGISTRATIONS) app.experimental_icons.register(icon);
+  app.composer.customize({
+    id: "stack",
+    banners: [{ id: "stack-position", chrome: "bare", component: StackBanner }],
+  });
   app.slots.navPanel({
     id: "example-todos",
     title: "Example todos",

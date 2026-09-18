@@ -11,6 +11,7 @@
 import { randomUUID } from "node:crypto";
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { currentStack } from "./lib/current-stack.ts";
 
 const todoSchema = z.object({
   id: z.string(),
@@ -38,6 +39,33 @@ export const rpcContract = defineRpcContract({
   todos_remove: {
     input: z.object({ id: z.string() }),
     output: z.object({ removed: z.boolean() }),
+  },
+  stack_current: {
+    input: z.object({
+      projectId: z.string(),
+      threadId: z.string().nullable().optional(),
+    }),
+    output: z.discriminatedUnion("outcome", [
+      z.object({
+        outcome: z.literal("stacked"),
+        branch: z.string(),
+        position: z.number(),
+        total: z.number(),
+        placement: z.enum(["top", "middle", "bottom"]),
+        needsRestack: z.boolean(),
+        isStale: z.boolean(),
+        workingTree: z.string().nullable(),
+        branches: z.array(
+          z.object({
+            name: z.string(),
+            isCurrent: z.boolean(),
+            needsRestack: z.boolean(),
+            isStale: z.boolean(),
+          }),
+        ),
+      }),
+      z.object({ outcome: z.literal("none"), reason: z.string() }),
+    ]),
   },
 });
 
@@ -109,6 +137,8 @@ export default async function plugin(bb: BbPluginApi) {
       return todo;
     },
     todos_remove: async ({ id }) => ({ removed: await removeTodo(id) }),
+    stack_current: ({ projectId, threadId }) =>
+      currentStack(bb, { projectId, threadId: threadId ?? null }),
   });
 
   // The `bb graphite` command: what agents (and you) use from a shell. Parsing
