@@ -3,58 +3,89 @@
 Test against a separate BB instance. Do not install a plugin under development into
 the live instance.
 
-## How BB resolves its data directory
+Verified 2026-09-18 against BB `0.43.1`.
 
-Verified by reading the installed BB `0.43.1` server bundle.
+## Launch an isolated instance
 
-- `BB_DATA_DIR` overrides the data directory outright. A leading `~` expands. An
-  empty value throws.
-- With no override in production mode, the data directory is `~/.bb`, the server port
-  is `38886`, and the host daemon port is `38887`.
-- With no override in development mode, the data directory is
-  `~/.bb-dev/<instanceId>`, with server ports allocated from base `19000` and host
-  daemon ports from base `27000`, offset per repository root.
-
-So a separate instance needs three variables:
+The installed desktop app ships a headless entrypoint. Use it — it is the same
+`0.43.1` build the live instance runs, so no npm install and no `../bb` build is
+needed.
 
 ```sh
-BB_DATA_DIR=~/.bb-dev/graphite
-BB_SERVER_PORT=19100
-BB_HOST_DAEMON_PORT=27100
+BB_APP=/Applications/bb.app/Contents/Resources/app.asar.unpacked/node_modules/bb-app/dist/bb-app.js
+
+ELECTRON_RUN_AS_NODE=1 /Applications/bb.app/Contents/MacOS/bb "$BB_APP" \
+  --data-dir /tmp/bb-graphite-test/data \
+  --server-port 19100 \
+  --host-daemon-port 27100 \
+  > /tmp/bb-graphite-test/bb-app.log 2>&1 &
 ```
 
-Pick ports that do not collide with the live instance's `38886`/`38887` or with an
-existing `~/.bb-dev/*` instance.
+- Run the entrypoint through `ELECTRON_RUN_AS_NODE=1` and the app's own binary. BB's
+  native SQLite binding is built for Electron's ABI; a system `node` is the wrong
+  runtime for it.
+- `--data-dir`, `--server-port`, and `--host-daemon-port` are real flags on
+  `bb-app`. Confirm with `bb-app --help`.
+- The live instance holds `38886` and `38887`. Pick ports that collide with neither
+  those nor an existing `~/.bb-dev/*` instance. Check with
+  `lsof -nP -iTCP:<port> -sTCP:LISTEN`.
+- The process prints `bb is ready` with its app URL, daemon port, data dir, and log
+  path. It starts both the server and the host daemon.
 
-## Unverified
+## Point the CLI at it
 
-The launch invocation has not been tested. There is no `bb serve` command; the server
-runs inside the desktop app. Before relying on this setup, determine and record here:
+```sh
+export BB_SERVER_URL=http://127.0.0.1:19100
+export BB_DATA_DIR=/tmp/bb-graphite-test/data
+```
 
-1. How to start a second server with those variables set — a second app instance, or
-   the server binary directly.
-2. How `bb` CLI calls are routed to it. `BB_SERVER_URL` exists and is the likely
-   mechanism; confirm it.
-3. Whether provider credentials and project bindings must be re-established in the
-   new data directory.
+- Both variables are needed. `BB_SERVER_URL` routes the request; `BB_DATA_DIR`
+  selects the data directory.
+- Confirm isolation before trusting a test: `bb plugin list --json` must show
+  builtins only, and `bb project list --json` must be empty.
+- Unset both, or use `env -u BB_SERVER_URL -u BB_DATA_DIR bb …`, to address the live
+  instance from the same shell.
 
-Do not report the separate instance as working until all three are answered.
+## Credentials and project bindings
+
+A fresh data directory starts empty. Verified: builtins only, no projects, Connect
+unpaired. Provider credentials, projects, and environments must be re-established in
+the new data directory before any test that needs them.
+
+## Stop it
+
+```sh
+ELECTRON_RUN_AS_NODE=1 /Applications/bb.app/Contents/MacOS/bb "$BB_APP" \
+  stop --data-dir /tmp/bb-graphite-test/data
+```
+
+Verified: stops the server and daemon by the data directory's lock and leaves the
+live instance running.
 
 ## The development loop
 
 ```sh
 bb plugin build          # compile to dist/; no server required
-bb plugin install .      # install from the local path
+bb plugin install . --yes  # install from the local path
 bb plugin dev            # watch sources, rebuild, reload on change
 bb plugin logs graphite  # read bb.log output
 bb plugin reload graphite
 ```
 
-`bb plugin dev` is the inner loop. `bb plugin build` must succeed before install or
-release.
+- `bb plugin install` refuses without `--yes`, because a plugin is full-trust server
+  code.
+- Verified end to end against the isolated instance: install reported
+  `graphite@0.1.0 running`, and `bb graphite --help` returned the plugin's own usage.
+- `bb plugin build` must succeed before install or release.
 
 ## A scratch stack to test against
 
 The plugin needs a real Graphite stack with at least two stacked branches plus trunk,
-so that parent and child metadata refs both exist. Create one in a throwaway
-repository rather than against real work — step 5 of the plan runs destructive verbs.
+so that a trunk row and child rows both exist in `.graphite_metadata.db`. Create one
+in a throwaway repository rather than against real work — step 5 of the plan runs
+destructive verbs.
+
+`/tmp/gt-scratch-20260918` is such a repository: trunk `main`, a branching stack
+(`feat-a` with children `feat-b` and `feat-c`), one branch deliberately left needing
+a restack, and a linked worktree at `/tmp/gt-scratch-wt-20260918` for exercising the
+`--git-common-dir` path.
