@@ -66,6 +66,7 @@ export const rpcContract = defineRpcContract({
               z.object({
                 name: z.string(),
                 column: z.number(),
+                parent: z.string().nullable(),
                 needsRestack: z.boolean(),
                 isStale: z.boolean(),
     threads: z.array(z.object({ id: z.string(), title: z.string() })),

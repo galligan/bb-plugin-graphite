@@ -19,6 +19,8 @@ import type { StackBranch, StackSnapshot } from "./types.ts";
 export interface StackOffshoot {
   readonly name: string;
   readonly column: number;
+  /** The branch this one hangs off. Null when it hangs off the chain itself. */
+  readonly parent: string | null;
   readonly needsRestack: boolean;
   readonly isStale: boolean;
 }
@@ -116,15 +118,16 @@ export function stackOffshoots(
   // above the row it joins. That is the order `gt ls` prints, and it is what makes
   // a column readable — the node closing a column appears directly under the run
   // it closes.
-  const walk = (name: string, column: number): void => {
+  const walk = (name: string, column: number, parent: string | null): void => {
     const branch = byName.get(name);
     if (branch === undefined || seen.has(name) || inCycle.has(name)) return;
     seen.add(name);
     // The first child continues this column; each extra child opens the next one.
-    branch.children.forEach((child, index) => walk(child, column + index));
+    branch.children.forEach((child, index) => walk(child, column + index, name));
     out.push({
       name,
       column,
+      parent,
       needsRestack: branch.needsRestack,
       isStale: branch.isStale,
     });
@@ -134,6 +137,6 @@ export function stackOffshoots(
   if (start === undefined) return out;
   start.children
     .filter((child) => !chainNames.has(child))
-    .forEach((child, index) => walk(child, 1 + index));
+    .forEach((child, index) => walk(child, 1 + index, null));
   return out;
 }

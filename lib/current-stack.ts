@@ -25,6 +25,8 @@ export interface CurrentStackOffshoot {
   name: string;
   /** Divergence column, 1 for the first line off the branch. Not generation depth. */
   column: number;
+  /** The branch it hangs off; null when it hangs off the chain branch itself. */
+  parent: string | null;
   needsRestack: boolean;
   isStale: boolean;
   threads: CurrentStackThread[];

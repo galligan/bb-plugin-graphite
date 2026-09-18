@@ -22,11 +22,14 @@ import type { rpcContract, Todo } from "./server";
 import type {
   CurrentStack,
   CurrentStackBranch,
+  CurrentStackOffshoot,
   CurrentStackThread,
 } from "./lib/current-stack.ts";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Icon } from "@/components/ui/icon";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { ChatIcon } from "@hugeicons/core-free-icons";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import {
@@ -214,6 +217,7 @@ function StackBanner() {
   const { projectId, threadId } = useBbContext();
   const [stack, setStack] = useState<CurrentStack | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [openBranches, setOpenBranches] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(() => {
     if (projectId === null) {
@@ -240,6 +244,14 @@ function StackBanner() {
   const state = stack.needsRestack ? "Needs restack" : stack.isStale ? "Drifted" : null;
   // Tip first, the way `gt ls` prints it: trunk is the last line, not the first.
   const rows = [...stack.branches].reverse();
+  // One lane width for every row, so branch names line up whether or not the row
+  // has columns beside it — the way `gt ls` keeps a single name column.
+  const lanes = Math.max(
+    0,
+    ...rows
+      .filter((branch) => openBranches.has(branch.name))
+      .map((branch) => laneWidth(branch.offshoots)),
+  );
 
   return (
     // Structure copied from BB's own diff bar so the two rows share a baseline:
@@ -285,6 +297,16 @@ function StackBanner() {
                 branch={branch}
                 first={index === 0}
                 last={index === rows.length - 1}
+                open={openBranches.has(branch.name)}
+                onToggle={() =>
+                  setOpenBranches((current) => {
+                    const next = new Set(current);
+                    if (next.has(branch.name)) next.delete(branch.name);
+                    else next.add(branch.name);
+                    return next;
+                  })
+                }
+                laneWidth={lanes}
               />
             ))}
           </ol>
@@ -299,35 +321,38 @@ function StackRow({
   branch,
   first,
   last,
+  open,
+  onToggle,
+  laneWidth: lanes,
 }: {
   readonly branch: CurrentStackBranch;
   readonly first: boolean;
   readonly last: boolean;
+  readonly open: boolean;
+  readonly onToggle: () => void;
+  readonly laneWidth: number;
 }) {
-  const [open, setOpen] = useState(false);
   const count = branch.offshoots.length;
+  const showOffshoots = open && count > 0;
 
   return (
     <li>
       {/* Offshoots sit above the branch they hang off, the way `gt ls` stacks them,
           so the parent's row is where the columns join. */}
-      {open
-        ? branch.offshoots.map((offshoot) => (
+      {showOffshoots
+        ? layoutOffshoots(branch.offshoots).map((row) => (
             <div
-              key={offshoot.name}
+              key={row.offshoot.name}
               className="grid grid-cols-[0.875rem_auto_minmax(0,1fr)] items-center gap-x-1.5 rounded px-2"
             >
               <LineageNode first={first} last={last} current={false} passthrough />
-              <span
-                className="flex items-center"
-                style={{ paddingLeft: `${(offshoot.column - 1) * 14}px` }}
-              >
-                <OffshootNode />
-              </span>
+              <OffshootLanes row={row} width={lanes} />
               <span className="flex min-w-0 items-center gap-1.5">
-                <span className="truncate text-xs leading-5 opacity-55">{offshoot.name}</span>
-                {offshoot.needsRestack ? <RestackMark /> : null}
-                <ThreadMarks threads={offshoot.threads} />
+                <span className="truncate text-xs leading-5 opacity-55">
+                  {row.offshoot.name}
+                </span>
+                {row.offshoot.needsRestack ? <RestackMark /> : null}
+                <ThreadMarks threads={row.offshoot.threads} />
               </span>
             </div>
           ))
@@ -337,26 +362,36 @@ function StackRow({
           first={first}
           last={last}
           current={branch.isCurrent}
-          join={open && branch.offshoots.length > 0}
+          join={showOffshoots}
         />
-        <span
-          className={cn(
-            "truncate text-xs leading-5",
-            branch.isCurrent ? "font-medium text-foreground" : "opacity-70",
-          )}
-        >
-          {branch.name}
-        </span>
-        <span className="flex items-center gap-1.5">
+        {showOffshoots ? (
+          <ChainJoin
+            columns={branch.offshoots
+              .filter((offshoot) => offshoot.parent === null)
+              .map((offshoot) => offshoot.column)}
+            width={lanes}
+          />
+        ) : (
+          <span style={{ width: lanes }} className="shrink-0" />
+        )}
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span
+            className={cn(
+              "truncate text-xs leading-5",
+              branch.isCurrent ? "font-medium text-foreground" : "opacity-70",
+            )}
+          >
+            {branch.name}
+          </span>
           {branch.needsRestack ? <RestackMark /> : null}
           <ThreadMarks threads={branch.threads} />
           {count > 0 ? (
             <button
               type="button"
-              onClick={() => setOpen((value) => !value)}
+              onClick={onToggle}
               aria-expanded={open}
               aria-label={`${count} branch${count === 1 ? "" : "es"} off ${branch.name}`}
-              className="flex cursor-pointer items-center gap-0.5 rounded px-1 text-2xs leading-4 text-subtle-foreground transition-colors hover:bg-state-hover hover:text-foreground"
+              className="flex shrink-0 cursor-pointer items-center gap-0.5 rounded px-1 text-2xs leading-4 text-subtle-foreground transition-colors hover:bg-state-hover hover:text-foreground"
             >
               <Icon
                 name="ChevronRight"
@@ -368,6 +403,112 @@ function StackRow({
         </span>
       </div>
     </li>
+  );
+}
+
+const LANE = 14;
+
+interface OffshootRow {
+  readonly offshoot: CurrentStackOffshoot;
+  /** Columns with a line passing straight through this row. */
+  readonly through: readonly number[];
+  /** A branch in the same column joins this row from above. */
+  readonly fromAbove: boolean;
+  /** Columns that close into this row, drawn as the elbow of `◯─┘`. */
+  readonly closes: readonly number[];
+}
+
+function laneWidth(offshoots: readonly CurrentStackOffshoot[]): number {
+  return Math.max(1, ...offshoots.map((offshoot) => offshoot.column)) * LANE;
+}
+
+/**
+ * Works out, for each row, which columns have a line running through it and which
+ * close into it. Offshoots arrive in post-order, so a branch always appears after
+ * its descendants and every line runs downward to the row it joins.
+ */
+function layoutOffshoots(offshoots: readonly CurrentStackOffshoot[]): OffshootRow[] {
+  const indexOf = new Map(offshoots.map((offshoot, index) => [offshoot.name, index]));
+  // A row whose parent is not an offshoot joins the chain branch, below every row.
+  const parentRow = offshoots.map((offshoot) =>
+    offshoot.parent === null ? offshoots.length : (indexOf.get(offshoot.parent) ?? offshoots.length),
+  );
+
+  return offshoots.map((offshoot, index) => {
+    const through: number[] = [];
+    let fromAbove = false;
+    const closes: number[] = [];
+    for (let other = 0; other < index; other += 1) {
+      if (parentRow[other] > index) through.push(offshoots[other].column);
+      if (parentRow[other] !== index) continue;
+      if (offshoots[other].column === offshoot.column) fromAbove = true;
+      else closes.push(offshoots[other].column);
+    }
+    return { offshoot, through: [...new Set(through)], fromAbove, closes };
+  });
+}
+
+/**
+ * The elbows on the chain branch's own row, where every column hanging off it
+ * turns in and closes — the `◯─┴─┘` at the foot of a fork in `gt ls`.
+ */
+function ChainJoin({
+  columns,
+  width,
+}: {
+  readonly columns: readonly number[];
+  readonly width: number;
+}) {
+  const x = (column: number) => (column - 1) * LANE + 7;
+  return (
+    <svg
+      viewBox={`0 0 ${width} 20`}
+      width={width}
+      height={20}
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      <g stroke="currentColor" strokeWidth="1" opacity="0.3" fill="none">
+        {columns.map((column) => (
+          <path key={column} d={`M${x(column)} 0 V10 H-6`} />
+        ))}
+      </g>
+    </svg>
+  );
+}
+
+function OffshootLanes({ row, width }: { readonly row: OffshootRow; readonly width: number }) {
+  const x = (column: number) => (column - 1) * LANE + 7;
+  const own = x(row.offshoot.column);
+  return (
+    <svg
+      viewBox={`0 0 ${width} 20`}
+      width={width}
+      height={20}
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      <g stroke="currentColor" strokeWidth="1" opacity="0.3" fill="none">
+        {row.through.map((column) => (
+          <line key={column} x1={x(column)} y1="0" x2={x(column)} y2="20" />
+        ))}
+        {row.fromAbove ? <line x1={own} y1="0" x2={own} y2="6.75" /> : null}
+        <line x1={own} y1="13.25" x2={own} y2="20" />
+        {/* the elbow: the closing column drops to this row, then turns into the node */}
+        {row.closes.map((column) => (
+          <path key={column} d={`M${x(column)} 0 V10 H${own + 3.25}`} />
+        ))}
+      </g>
+      <circle
+        cx={own}
+        cy="10"
+        r="3.25"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        opacity="0.4"
+      />
+    </svg>
   );
 }
 
@@ -390,9 +531,13 @@ function ThreadMarks({ threads }: { readonly threads: CurrentStackThread[] }) {
             event.stopPropagation();
             navigate.toThread(thread.id);
           }}
-          className="flex cursor-pointer items-center rounded p-0.5 text-subtle-foreground transition-colors hover:bg-state-hover hover:text-foreground"
+          className="group/thread flex max-w-[14rem] cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-state-hover hover:text-foreground"
         >
-          <Icon name="MessageSquare" className="size-3" />
+          <HugeiconsIcon icon={ChatIcon} className="size-3 shrink-0" />
+          {/* Collapsed to the glyph until hover, then the pill grows to name the thread. */}
+          <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-150 group-hover/thread:max-w-[12rem] group-hover/thread:opacity-100">
+            {thread.title}
+          </span>
         </button>
       ))}
     </span>
