@@ -1,266 +1,193 @@
-// bb-plugin-graphite — a BB plugin backend entry.
+// bb-plugin-graphite — the plugin's backend.
 //
-// The default export is a factory that receives the plugin API. BB supplies
-// the tiny defineRpcContract runtime helper; the API type remains type-only.
+// Three surfaces over one collector, so they cannot disagree:
 //
-// The example is a todo list. One store in bb.storage.kv serves three
-// surfaces: the Example todos page (app.tsx, over RPC), the `bb graphite` CLI
-// command (below), and the skill in skills/example-todos/SKILL.md that tells
-// agents how to use that command. A write from any surface publishes a realtime signal so
-// every open page refetches.
-import { randomUUID } from "node:crypto";
+//   - `stack_current` RPC, which app.tsx draws above the composer
+//   - `bb graphite …`, for a terminal and for agents through the generated
+//     plugin-commands skill
+//   - a `graphite_stack` agent tool, for a thread that wants the snapshot
+//     without shelling out
+//
+// The read path never invokes `gt`: any `gt` command silently refreshes the
+// metadata it would be read from, which destroys the one signal `gt` cannot
+// report. See docs/agents/graphite.md.
+
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+
 import { currentStack } from "./lib/current-stack.ts";
+import { renderStack } from "./lib/render-stack.ts";
+import { runVerb, type VerbName } from "./lib/verbs.ts";
 
-const todoSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-  done: z.boolean(),
-  createdAt: z.string(),
+const threadSchema = z.object({ id: z.string(), title: z.string() });
+
+const stackedSchema = z.object({
+  outcome: z.literal("stacked"),
+  branch: z.string(),
+  position: z.number(),
+  total: z.number(),
+  placement: z.enum(["top", "middle", "bottom"]),
+  needsRestack: z.boolean(),
+  isStale: z.boolean(),
+  workingTree: z.string().nullable(),
+  branches: z.array(
+    z.object({
+      name: z.string(),
+      isCurrent: z.boolean(),
+      needsRestack: z.boolean(),
+      isStale: z.boolean(),
+      threads: z.array(threadSchema),
+      offshoots: z.array(
+        z.object({
+          name: z.string(),
+          column: z.number(),
+          parent: z.string().nullable(),
+          needsRestack: z.boolean(),
+          isStale: z.boolean(),
+          threads: z.array(threadSchema),
+        }),
+      ),
+    }),
+  ),
 });
-export type Todo = z.infer<typeof todoSchema>;
 
-// Both schemas run at the wire boundary. Handler input/output are inferred
-// from the shared contract; app.tsx imports only its type.
 export const rpcContract = defineRpcContract({
-  todos_list: {
-    input: z.null(),
-    output: z.object({ todos: z.array(todoSchema) }),
-  },
-  todos_add: {
-    input: z.object({ title: z.string().trim().min(1).max(200) }),
-    output: todoSchema,
-  },
-  todos_set_done: {
-    input: z.object({ id: z.string(), done: z.boolean() }),
-    output: todoSchema,
-  },
-  todos_remove: {
-    input: z.object({ id: z.string() }),
-    output: z.object({ removed: z.boolean() }),
-  },
   stack_current: {
     input: z.object({
       projectId: z.string(),
       threadId: z.string().nullable().optional(),
     }),
     output: z.discriminatedUnion("outcome", [
-      z.object({
-        outcome: z.literal("stacked"),
-        branch: z.string(),
-        position: z.number(),
-        total: z.number(),
-        placement: z.enum(["top", "middle", "bottom"]),
-        needsRestack: z.boolean(),
-        isStale: z.boolean(),
-        workingTree: z.string().nullable(),
-        branches: z.array(
-          z.object({
-            name: z.string(),
-            isCurrent: z.boolean(),
-            needsRestack: z.boolean(),
-            isStale: z.boolean(),
-            threads: z.array(z.object({ id: z.string(), title: z.string() })),
-            offshoots: z.array(
-              z.object({
-                name: z.string(),
-                column: z.number(),
-                parent: z.string().nullable(),
-                needsRestack: z.boolean(),
-                isStale: z.boolean(),
-    threads: z.array(z.object({ id: z.string(), title: z.string() })),
-              }),
-            ),
-          }),
-        ),
-      }),
+      stackedSchema,
       z.object({ outcome: z.literal("none"), reason: z.string() }),
     ]),
   },
 });
 
-/** Realtime channel app.tsx listens on; the payload is the todo count. */
-const TODOS_CHANGED = "todos-changed";
+const WRITE_VERBS: readonly VerbName[] = ["restack", "submit", "sync", "merge"];
+
+const USAGE = [
+  "Usage:",
+  "  bb graphite stack [--json]      the stack around the checked-out branch",
+  "  bb graphite restack [--force]   rebase the stack onto its parents",
+  "  bb graphite submit [--force]    push the stack and open or update its PRs",
+  "  bb graphite sync [--force]      pull trunk, restack, drop merged branches",
+  "  bb graphite merge [--force]     merge the stack in order",
+  "",
+  "Acts on the current thread's environment. Outside a thread, name one with",
+  "--project <id> or --thread <id>.",
+  "",
+  "Every write verb refuses a working tree that is not clean unless --force.",
+].join("\n");
 
 export default async function plugin(bb: BbPluginApi) {
   bb.log.info("loaded");
 
-  // Declarative settings — rendered in BB's settings UI and editable with
-  // `bb plugin config graphite`. Add `secret: true` for values like API keys.
-  // Settings are read once per load: reload the plugin after changing one.
-  const settings = bb.settings.define({
-    showDone: {
-      type: "boolean",
-      label: "Show completed todos",
-      default: true,
-    },
-  });
-  const { showDone } = await settings.get();
-
-  // Namespaced key-value storage in bb.db (JSON values, up to 256KB each).
-  // For bigger or relational data use bb.storage.database().
-  async function readTodos(): Promise<Todo[]> {
-    return (await bb.storage.kv.get<Todo[]>("todos")) ?? [];
-  }
-  async function writeTodos(todos: Todo[]): Promise<void> {
-    await bb.storage.kv.set("todos", todos);
-    // Ephemeral broadcast to every connected client; nothing is persisted.
-    bb.realtime.publish(TODOS_CHANGED, { count: todos.length });
-  }
-
-  async function listTodos(): Promise<Todo[]> {
-    const todos = await readTodos();
-    return showDone ? todos : todos.filter((todo) => !todo.done);
-  }
-  async function addTodo(title: string): Promise<Todo> {
-    const todo: Todo = {
-      id: randomUUID().slice(0, 8),
-      title,
-      done: false,
-      createdAt: new Date().toISOString(),
-    };
-    await writeTodos([...(await readTodos()), todo]);
-    return todo;
-  }
-  async function setTodoDone(id: string, done: boolean): Promise<Todo | null> {
-    const todos = await readTodos();
-    const todo = todos.find((candidate) => candidate.id === id);
-    if (todo === undefined) return null;
-    todo.done = done;
-    await writeTodos(todos);
-    return todo;
-  }
-  async function removeTodo(id: string): Promise<boolean> {
-    const todos = await readTodos();
-    const remaining = todos.filter((todo) => todo.id !== id);
-    if (remaining.length === todos.length) return false;
-    await writeTodos(remaining);
-    return true;
-  }
-
   bb.rpc.register(rpcContract, {
-    todos_list: async () => ({ todos: await listTodos() }),
-    todos_add: ({ title }) => addTodo(title),
-    todos_set_done: async ({ id, done }) => {
-      const todo = await setTodoDone(id, done);
-      if (todo === null) throw new Error(`No todo with id ${id}`);
-      return todo;
-    },
-    todos_remove: async ({ id }) => ({ removed: await removeTodo(id) }),
     stack_current: ({ projectId, threadId }) =>
       currentStack(bb, { projectId, threadId: threadId ?? null }),
   });
 
-  // The `bb graphite` command: what agents (and you) use from a shell. Parsing
-  // argv is plugin-owned; `commands` is metadata BB renders into help and
-  // the generated plugin-commands skill without running plugin code.
-  const usage = [
-    "Usage:",
-    "  bb graphite list [--json]",
-    "  bb graphite add <title> [--json]",
-    "  bb graphite done <todo-id> [--json]",
-    "  bb graphite undo <todo-id> [--json]",
-    "  bb graphite remove <todo-id> [--json]",
-  ].join("\n");
-  function formatTodo(todo: Todo): string {
-    return `[${todo.done ? "x" : " "}] ${todo.id}  ${todo.title}`;
-  }
-  bb.cli.register({
-    name: "graphite",
-    summary: "Manage the Graphite plugin's example todo list",
-    commands: [
-      { name: "list", summary: "List todos", usage: "bb graphite list [--json]" },
-      {
-        name: "add",
-        summary: "Add a todo",
-        usage: "bb graphite add <title> [--json]",
-      },
-      {
-        name: "done",
-        summary: "Mark a todo done",
-        usage: "bb graphite done <todo-id> [--json]",
-      },
-      {
-        name: "undo",
-        summary: "Mark a todo not done",
-        usage: "bb graphite undo <todo-id> [--json]",
-      },
-      {
-        name: "remove",
-        summary: "Remove a todo",
-        usage: "bb graphite remove <todo-id> [--json]",
-      },
-    ],
-    async run(argv) {
-      const json = argv.includes("--json");
-      const [command, ...args] = argv.filter((arg) => arg !== "--json");
-      const reply = (value: unknown, text: string) => ({
-        exitCode: 0,
-        stdout: json ? JSON.stringify(value) : text,
-      });
-      const notFound = (missingId: string) => ({
-        exitCode: 1,
-        stderr: `No todo with id ${missingId}. Run "bb graphite list" to see ids.`,
-      });
-      const todoId = args[0];
-      switch (command) {
-        case undefined:
-        case "help":
-        case "--help":
-          return { exitCode: 0, stdout: usage };
-        case "list": {
-          const todos = await listTodos();
-          return reply(
-            todos,
-            todos.length === 0 ? "No todos." : todos.map(formatTodo).join("\n"),
-          );
-        }
-        case "add": {
-          const title = args.join(" ").trim();
-          if (title === "") break;
-          const todo = await addTodo(title);
-          return reply(todo, `Added ${formatTodo(todo)}`);
-        }
-        case "done":
-        case "undo": {
-          if (todoId === undefined || args.length !== 1) break;
-          const todo = await setTodoDone(todoId, command === "done");
-          if (todo === null) return notFound(todoId);
-          return reply(todo, formatTodo(todo));
-        }
-        case "remove": {
-          if (todoId === undefined || args.length !== 1) break;
-          if (!(await removeTodo(todoId))) return notFound(todoId);
-          return reply({ removed: true, id: todoId }, `Removed ${todoId}`);
-        }
+  bb.agents.registerTool({
+    name: "graphite_stack",
+    description:
+      "Read the Graphite stack around the branch this thread's environment has " +
+      "checked out: position, what needs a restack, what hangs off each branch, " +
+      "and which threads are working on them.",
+    instructions:
+      "Use graphite_stack instead of running `gt log` or `gt ls`. Those commands " +
+      "refresh Graphite's own metadata as a side effect, which destroys the " +
+      "staleness signal this tool reports.",
+    presentation: {
+      label: { pending: "Reading the Graphite stack", completed: "Read the Graphite stack" },
+    },
+    parameters: z.object({}),
+    async execute(_input, { threadId, projectId }) {
+      if (projectId == null) {
+        return { content: [{ type: "text", text: "No project for this thread." }], isError: true };
       }
-      return { exitCode: 1, stderr: usage };
+      const stack = await currentStack(bb, { projectId, threadId: threadId ?? null });
+      return renderStack(stack);
     },
   });
 
-  // Cleanup on reload/disable/shutdown; hooks run LIFO. The sanctioned place
-  // to clear timers and close connections.
-  bb.onDispose(() => {
-    bb.log.info("disposed");
-  });
+  bb.cli.register({
+    name: "graphite",
+    summary: "Read and drive the Graphite stack for this project",
+    commands: [
+      { name: "stack", summary: "Show the stack around the checked-out branch", usage: "bb graphite stack [--json]" },
+      { name: "restack", summary: "Rebase the stack onto its parents", usage: "bb graphite restack [--force]" },
+      { name: "submit", summary: "Push the stack and open or update its PRs", usage: "bb graphite submit [--force]" },
+      { name: "sync", summary: "Pull trunk, restack, drop merged branches", usage: "bb graphite sync [--force]" },
+      { name: "merge", summary: "Merge the stack in order", usage: "bb graphite merge [--force]" },
+    ],
+    async run(argv, ctx) {
+      const [command, ...rest] = argv;
+      const json = rest.includes("--json");
+      const force = rest.includes("--force");
+      // Outside a thread there is no environment to infer, so let the caller name one.
+      const flagValue = (flag: string): string | null => {
+        const at = rest.indexOf(flag);
+        return at === -1 ? null : (rest[at + 1] ?? null);
+      };
+      const projectFlag = flagValue("--project");
+      const threadFlag = flagValue("--thread");
+      const consumed = new Set([
+        "--json",
+        "--force",
+        "--project",
+        "--thread",
+        projectFlag ?? "",
+        threadFlag ?? "",
+      ]);
+      const passthrough = rest.filter((arg) => !consumed.has(arg));
 
-  // Long-lived background work: starts after load, gets an AbortSignal on
-  // reload/disable/shutdown, and restarts with backoff if it crashes. Sleeps
-  // must wake on abort — a plain setTimeout sleeps through the stop window
-  // and the plugin reports "degraded (service did not stop)" on reload.
-  // bb.background.service("worker", {
-  //   async start(signal) {
-  //     while (!signal.aborted) {
-  //       await new Promise((resolve) => {
-  //         const timer = setTimeout(resolve, 60_000);
-  //         signal.addEventListener(
-  //           "abort",
-  //           () => { clearTimeout(timer); resolve(undefined); },
-  //           { once: true },
-  //         );
-  //       });
-  //     }
-  //   },
-  // });
+      if (command === undefined || command === "help" || command === "--help") {
+        return { exitCode: 0, stdout: USAGE };
+      }
+      const projectId = projectFlag ?? ctx.projectId ?? null;
+      if (projectId == null) {
+        return {
+          exitCode: 1,
+          stderr: "Run this inside a project or a thread, or pass --project <id>.",
+        };
+      }
+      // An explicit --project overrides the invoking thread: that thread belongs to
+      // whichever BB instance the shell is bound to, which need not be this one.
+      const request = {
+        projectId,
+        threadId: threadFlag ?? (projectFlag === null ? (ctx.threadId ?? null) : null),
+      };
+
+      if (command === "stack") {
+        const stack = await currentStack(bb, request);
+        if (json) return { exitCode: 0, stdout: JSON.stringify(stack, null, 2) };
+        return { exitCode: stack.outcome === "stacked" ? 0 : 1, stdout: renderStack(stack) };
+      }
+
+      const verb = WRITE_VERBS.find((candidate) => candidate === command);
+      if (verb === undefined) {
+        return { exitCode: 1, stderr: `Unknown command: ${command}\n\n${USAGE}` };
+      }
+
+      const result = await runVerb(bb, {
+        ...request,
+        verb,
+        args: passthrough,
+        force,
+        signal: ctx.signal,
+      });
+      if (result.outcome === "refused") {
+        return { exitCode: 1, stderr: `Refused: ${result.reason}` };
+      }
+      if (result.outcome === "unavailable") {
+        return { exitCode: 1, stderr: result.reason };
+      }
+      return {
+        exitCode: result.exitCode,
+        stdout: result.stdout,
+        stderr: result.stderr,
+      };
+    },
+  });
 }

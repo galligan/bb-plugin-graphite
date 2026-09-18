@@ -61,39 +61,83 @@ function none(reason: string): CurrentStack {
   return { outcome: "none", reason };
 }
 
-export async function currentStack(
+/** The environment a command should act on: the thread's when there is one. */
+export interface ResolvedEnvironment {
+  readonly id: string;
+  readonly path: string;
+  readonly branchName: string;
+  readonly workingTree: string;
+}
+
+export type EnvironmentResolution =
+  | { readonly outcome: "resolved"; readonly environment: ResolvedEnvironment }
+  | { readonly outcome: "unavailable"; readonly reason: string };
+
+export async function resolveEnvironment(
   bb: BbPluginApi,
   request: CurrentStackRequest,
-): Promise<CurrentStack> {
+): Promise<EnvironmentResolution> {
   const environments = await bb.sdk.environments.list({ projectId: request.projectId });
-  if (environments.length === 0) return none("no environment for this project");
+  if (environments.length === 0) {
+    return { outcome: "unavailable", reason: "no environment for this project" };
+  }
 
   let chosen = environments[0];
   if (request.threadId != null) {
-    const thread = await bb.sdk.threads.get({ threadId: request.threadId });
-    const match = environments.find((candidate) => candidate.id === thread.environmentId);
+    // A thread id that does not resolve is not fatal: fall back to the project's
+    // first environment rather than failing the whole command.
+    const thread = await bb.sdk.threads
+      .get({ threadId: request.threadId })
+      .catch(() => null);
+    const match =
+      thread === null
+        ? undefined
+        : environments.find((candidate) => candidate.id === thread.environmentId);
     if (match !== undefined) chosen = match;
   }
 
   const path = chosen.path;
-  if (path === null) return none("environment has no workspace path");
-  if (!chosen.isGitRepo) return none("workspace is not a git repository");
+  if (path === null) return { outcome: "unavailable", reason: "environment has no workspace path" };
+  if (!chosen.isGitRepo) return { outcome: "unavailable", reason: "workspace is not a git repository" };
 
-  // The branch and working-tree state come from BB, never from a git call here.
+  // Branch and working-tree state come from BB, never from a git call here.
   const status = await bb.sdk.environments.status({ environmentId: chosen.id });
-  if (status.outcome !== "available") return none(`environment ${status.outcome}`);
+  if (status.outcome !== "available") {
+    return { outcome: "unavailable", reason: `environment ${status.outcome}` };
+  }
   const checkout = status.workspace.checkout;
-  if (checkout.kind !== "branch") return none(`checkout is ${checkout.kind}`);
+  if (checkout.kind !== "branch") {
+    return { outcome: "unavailable", reason: `checkout is ${checkout.kind}` };
+  }
+
+  return {
+    outcome: "resolved",
+    environment: {
+      id: chosen.id,
+      path,
+      branchName: checkout.branchName,
+      workingTree: status.workspace.workingTree.state,
+    },
+  };
+}
+
+export async function currentStack(
+  bb: BbPluginApi,
+  request: CurrentStackRequest,
+): Promise<CurrentStack> {
+  const resolution = await resolveEnvironment(bb, request);
+  if (resolution.outcome !== "resolved") return none(resolution.reason);
+  const environment = resolution.environment;
 
   let snapshot;
   try {
-    snapshot = await readStack({ repoPath: path });
+    snapshot = await readStack({ repoPath: environment.path });
   } catch (cause) {
     if (cause instanceof StackReadError) return none(cause.code.replaceAll("_", " "));
     throw cause;
   }
 
-  const chain = stackChain(snapshot, checkout.branchName);
+  const chain = stackChain(snapshot, environment.branchName);
   if (chain === null) return none("branch is not tracked by Graphite");
 
   const inChain = new Set(chain.branches.map((branch) => branch.name));
@@ -101,16 +145,21 @@ export async function currentStack(
   // Which thread is working on which branch — the join neither tool has alone.
   // Graphite cannot see BB's threads; BB does not know the branches form a stack.
   const byBranch = new Map<string, CurrentStackThread[]>();
+  const environments = await bb.sdk.environments.list({ projectId: request.projectId });
   const environmentBranch = new Map<string, string>();
-  for (const environment of environments) {
-    if (environment.branchName !== null) environmentBranch.set(environment.id, environment.branchName);
+  for (const candidate of environments) {
+    if (candidate.branchName !== null) environmentBranch.set(candidate.id, candidate.branchName);
   }
   if (environmentBranch.size > 0) {
     const threads = await bb.sdk.threads.list({ projectId: request.projectId, limit: 200 });
     for (const thread of threads) {
-      const branchName = thread.environmentId === null ? undefined : environmentBranch.get(thread.environmentId);
+      const branchName =
+        thread.environmentId === null ? undefined : environmentBranch.get(thread.environmentId);
       if (branchName === undefined) continue;
-      const entry = { id: thread.id, title: thread.title ?? thread.titleFallback ?? "Untitled thread" };
+      const entry = {
+        id: thread.id,
+        title: thread.title ?? thread.titleFallback ?? "Untitled thread",
+      };
       const existing = byBranch.get(branchName);
       if (existing === undefined) byBranch.set(branchName, [entry]);
       else existing.push(entry);
@@ -120,16 +169,16 @@ export async function currentStack(
 
   return {
     outcome: "stacked",
-    branch: checkout.branchName,
+    branch: environment.branchName,
     position: chain.position,
     total: chain.total,
     placement: chain.placement,
     needsRestack: chain.needsRestack,
     isStale: chain.isStale,
-    workingTree: status.workspace.workingTree.state,
+    workingTree: environment.workingTree,
     branches: chain.branches.map((branch) => ({
       name: branch.name,
-      isCurrent: branch.name === checkout.branchName,
+      isCurrent: branch.name === environment.branchName,
       needsRestack: branch.needsRestack,
       isStale: branch.isStale,
       threads: threadsFor(branch.name),
