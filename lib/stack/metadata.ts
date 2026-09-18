@@ -6,10 +6,26 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { StackReadError, type StackIssue } from "./types.ts";
+import { StackReadError, type MetadataSchema, type StackIssue } from "./types.ts";
 
 export const METADATA_FILENAME = ".graphite_metadata.db";
 export const REPO_CONFIG_FILENAME = ".graphite_repo_config";
+
+/**
+ * The migrations every Graphite `1.8.6` database on this machine reports. A database
+ * that reports a different set has a schema this reader was not written against.
+ */
+export const KNOWN_MIGRATIONS: readonly string[] = [
+  "20260211_initial_schema",
+  "20260212_add_validation_columns",
+  "20260220_add_parent_head_revision",
+];
+
+/**
+ * `gt` writes this database on every invocation, including read commands. Let SQLite
+ * wait out a writer rather than failing the caller's command.
+ */
+const BUSY_TIMEOUT_MS = 2_000;
 
 const SELECT_BRANCHES =
   "select branch_name, parent_branch_name, parent_branch_revision, branch_revision, " +
@@ -29,6 +45,7 @@ export interface BranchRecord {
 export interface MetadataRead {
   readonly records: readonly BranchRecord[];
   readonly issues: readonly StackIssue[];
+  readonly schema: MetadataSchema;
 }
 
 type Cell = { readonly ok: true; readonly value: string | null } | { readonly ok: false };
@@ -127,6 +144,30 @@ function toRecord(
   };
 }
 
+/** Applied migration ids. Empty when the table is absent or unreadable, which is itself a change. */
+function readMigrations(database: DatabaseSync): readonly string[] {
+  let rows: Array<Record<string, unknown>>;
+  try {
+    rows = database.prepare("select name from kysely_migration order by name").all();
+  } catch {
+    return [];
+  }
+  const names: string[] = [];
+  for (const row of rows) {
+    if (typeof row.name === "string") names.push(row.name);
+  }
+  return names;
+}
+
+function checkSchema(migrations: readonly string[]): MetadataSchema {
+  const applied = new Set(migrations);
+  return {
+    migrations,
+    unexpected: migrations.filter((name) => !KNOWN_MIGRATIONS.includes(name)),
+    missing: KNOWN_MIGRATIONS.filter((name) => !applied.has(name)),
+  };
+}
+
 /** Reads every branch row. A row the reader cannot trust becomes an issue, not a throw. */
 export function readBranchRecords(gitCommonDir: string): MetadataRead {
   const path = join(gitCommonDir, METADATA_FILENAME);
@@ -135,13 +176,15 @@ export function readBranchRecords(gitCommonDir: string): MetadataRead {
   }
 
   let rows: Array<Record<string, unknown>>;
+  let schema: MetadataSchema;
   let database: DatabaseSync;
   try {
-    database = new DatabaseSync(path, { readOnly: true });
+    database = new DatabaseSync(path, { readOnly: true, timeout: BUSY_TIMEOUT_MS });
   } catch (cause) {
     throw new StackReadError("metadata_unreadable", `cannot open ${path}`, { cause });
   }
   try {
+    schema = checkSchema(readMigrations(database));
     rows = database.prepare(SELECT_BRANCHES).all();
   } catch (cause) {
     throw new StackReadError("metadata_unreadable", `cannot read branch_metadata in ${path}`, {
@@ -152,12 +195,19 @@ export function readBranchRecords(gitCommonDir: string): MetadataRead {
   }
 
   const issues: StackIssue[] = [];
+  if (schema.unexpected.length > 0 || schema.missing.length > 0) {
+    issues.push({
+      kind: "schema_changed",
+      unexpected: schema.unexpected,
+      missing: schema.missing,
+    });
+  }
   const records: BranchRecord[] = [];
   for (const row of rows) {
     const record = toRecord(row, issues);
     if (record !== null) records.push(record);
   }
-  return { records, issues };
+  return { records, issues, schema };
 }
 
 /** The trunk branch name Graphite was initialized with. Null when unreadable. */

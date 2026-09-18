@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
 import { createFixture, type Fixture } from "./fixture.ts";
-import { readStack, StackReadError, type StackBranch, type StackSnapshot } from "./index.ts";
+import {
+  KNOWN_MIGRATIONS,
+  readStack,
+  StackReadError,
+  type StackBranch,
+  type StackSnapshot,
+} from "./index.ts";
 
 function branch(snapshot: StackSnapshot, name: string): StackBranch {
   const found = snapshot.branches.find((candidate) => candidate.name === name);
@@ -333,6 +339,61 @@ describe("readStack", () => {
 
     it("keeps the cycle out of the roots", () => {
       assert.deepEqual(snapshot.roots, ["main"]);
+    });
+  });
+
+  describe("a database whose schema has moved", () => {
+    let fixture: Fixture;
+
+    before(async () => {
+      fixture = await createFixture();
+    });
+
+    after(() => fixture.dispose());
+
+    it("reports a clean schema when the migrations are the known set", async () => {
+      fixture.writeMetadata([{ branch_name: "main", children: "[]", validation_result: "TRUNK" }]);
+      const snapshot = await readStack({ repoPath: fixture.path });
+      assert.deepEqual(snapshot.schema.migrations, KNOWN_MIGRATIONS);
+      assert.deepEqual(snapshot.schema.unexpected, []);
+      assert.deepEqual(snapshot.schema.missing, []);
+      assert.deepEqual(snapshot.issues, []);
+    });
+
+    it("names a migration it does not know and still returns the stack", async () => {
+      const moved = await createFixture();
+      try {
+        moved.writeMetadata([{ branch_name: "main", children: "[]", validation_result: "TRUNK" }], {
+          migrations: [...KNOWN_MIGRATIONS, "20270101_add_something"],
+        });
+        const snapshot = await readStack({ repoPath: moved.path });
+        assert.deepEqual(snapshot.schema.unexpected, ["20270101_add_something"]);
+        assert.deepEqual(snapshot.issues, [
+          { kind: "schema_changed", unexpected: ["20270101_add_something"], missing: [] },
+        ]);
+        assert.deepEqual(
+          snapshot.branches.map((candidate) => candidate.name),
+          ["main"],
+        );
+      } finally {
+        moved.dispose();
+      }
+    });
+
+    it("names a migration it expected and did not find", async () => {
+      const older = await createFixture();
+      try {
+        older.writeMetadata([{ branch_name: "main", children: "[]", validation_result: "TRUNK" }], {
+          migrations: KNOWN_MIGRATIONS.slice(0, 1),
+        });
+        const snapshot = await readStack({ repoPath: older.path });
+        assert.deepEqual(snapshot.schema.missing, KNOWN_MIGRATIONS.slice(1));
+        assert.deepEqual(snapshot.issues, [
+          { kind: "schema_changed", unexpected: [], missing: KNOWN_MIGRATIONS.slice(1) },
+        ]);
+      } finally {
+        older.dispose();
+      }
     });
   });
 

@@ -25,7 +25,7 @@ export interface ReadStackOptions {
 export async function readStack(options: ReadStackOptions): Promise<StackSnapshot> {
   const gitCommonDir = await readGitCommonDir(options);
   const heads = await readBranchHeads(options);
-  const { records, issues } = readBranchRecords(gitCommonDir);
+  const { records, issues, schema } = readBranchRecords(gitCommonDir);
   const trunk = readTrunkName(gitCommonDir);
 
   const built = buildStack({ records, heads, trunk });
@@ -33,6 +33,7 @@ export async function readStack(options: ReadStackOptions): Promise<StackSnapsho
   return {
     gitCommonDir,
     trunk,
+    schema,
     branches: built.branches,
     roots: built.roots,
     cycles: built.cycles,
@@ -41,10 +42,11 @@ export async function readStack(options: ReadStackOptions): Promise<StackSnapsho
 }
 
 export { buildStack } from "./graph.ts";
-export { METADATA_FILENAME, REPO_CONFIG_FILENAME } from "./metadata.ts";
+export { KNOWN_MIGRATIONS, METADATA_FILENAME, REPO_CONFIG_FILENAME } from "./metadata.ts";
 export type { BranchRecord } from "./metadata.ts";
 export { StackReadError } from "./types.ts";
 export type {
+  MetadataSchema,
   StackBranch,
   StackIssue,
   StackReadErrorCode,

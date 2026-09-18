@@ -96,8 +96,14 @@ neither.
 - `parent_branch_revision` — the parent commit this branch was last stacked onto. When
   it differs from the parent's actual head, the branch needs a restack. `gt ls` prints
   this as `(needs restack)`.
-- `parent_head_revision` — the parent's head as of `gt`'s last restack pass. Added by
-  migration `20260220`; may be `NULL` on rows written before it.
+- `parent_head_revision` — the parent's head **as `gt` last observed it**, not as git
+  reports it now. Added by migration `20260220`; `NULL` on 10 of 243 child rows.
+  MUST NOT use `parent_branch_revision != parent_head_revision` as the needs-restack
+  test: both values are `gt`'s cache, so the comparison misses a parent that moved
+  since `gt` last ran. Verified — a raw `git commit` on a parent left
+  `parent_branch_revision == parent_head_revision` on its child while `gt ls` printed
+  `(needs restack)` for that child. Across 21 repositories the cached comparison
+  disagrees with the live one on 73 of 243 child rows.
 - `branch_revision` — the head commit `gt` last observed for this branch.
 - `children` — JSON array of branch names. **Not authoritative.** 10 of 413 rows across
   21 repositories disagree with the parent pointers, in both directions: `children`
@@ -134,14 +140,32 @@ git for-each-ref --format='%(refname:short) %(objectname)' refs/heads/
 
 - `branch_revision` differs from the branch's actual head → `gt`'s recorded view is
   behind the repository.
-- `parent_branch_revision` differs from the parent branch's actual head → the branch
-  needs a restack.
+- `parent_branch_revision` differs from **the parent branch's actual head** → the
+  branch needs a restack. Compare against git, never against `parent_head_revision`.
 
 `gt` refreshes `branch_revision` silently on **any** invocation, including `gt ls`.
 Verified: a raw `git commit` left `branch_revision 42eed4ce` against an actual head of
 `be6c1044`; running `gt ls` rewrote the row to `be6c1044` and printed nothing about it.
 A reader that never invokes `gt` is therefore the only thing that can observe this
 divergence — and invoking `gt` destroys the evidence.
+
+### Read before you write
+
+A `gt` write verb refreshes `branch_revision` and `parent_head_revision` as a side
+effect, so it destroys the evidence a snapshot is built from.
+
+- Capture the snapshot **before** invoking any `gt` verb in the same operation.
+- MUST NOT re-read the database after a `gt` verb and present the result as the
+  pre-operation state.
+
+### Treat the migration set as a tripwire
+
+The reader asserts the applied migration ids on every read.
+
+- On an unexpected or a missing migration id, report the id and keep serving the
+  snapshot. The `select` names its columns, so an additive migration cannot silently
+  change what is read, and a destructive one fails the read outright.
+- MUST NOT fall back to parsing `gt` output or to `refs/branch-metadata/*`.
 
 ### Answers to the plan's open questions
 
@@ -159,8 +183,9 @@ divergence — and invoking `gt` destroys the evidence.
 ### Still unverified
 
 - What writes `state`, and what its values are.
-- Whether `gt` holds a write lock long enough to fail a concurrent read, and what it
-  does on a corrupt database.
+- Whether `gt` holds a write lock long enough to exhaust a 2-second SQLite busy
+  timeout. The reader sets one; no contention failure has been observed.
+- What `gt` does with a corrupt database.
 - The database's behavior across a `gt sync` that deletes merged branches: whether rows
   are deleted or left orphaned.
 - Whether Graphite's own daemon or the VS Code extension writes to the same file.

@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 
-import { METADATA_FILENAME, REPO_CONFIG_FILENAME } from "./metadata.ts";
+import { KNOWN_MIGRATIONS, METADATA_FILENAME, REPO_CONFIG_FILENAME } from "./metadata.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -20,6 +20,10 @@ const CREATE_TABLE =
   '"parent_branch_name" text, "parent_branch_revision" text, ' +
   '"last_submitted_version" text, "state" text, "children" text, ' +
   '"branch_revision" text, "validation_result" text, "parent_head_revision" text)';
+
+const CREATE_MIGRATIONS =
+  'CREATE TABLE "kysely_migration" ("name" varchar(255) not null primary key, ' +
+  '"timestamp" varchar(255) not null)';
 
 const COLUMNS = [
   "branch_name",
@@ -68,10 +72,25 @@ export class Fixture {
   }
 
   /** Writes the Graphite metadata database and repo config as `gt` would. */
-  writeMetadata(rows: readonly MetadataRow[], trunk: string | null = "main"): void {
+  writeMetadata(
+    rows: readonly MetadataRow[],
+    options: {
+      readonly trunk?: string | null;
+      readonly migrations?: readonly string[];
+    } = {},
+  ): void {
+    const trunk = options.trunk ?? "main";
+    const migrations = options.migrations ?? KNOWN_MIGRATIONS;
     const database = new DatabaseSync(join(this.path, ".git", METADATA_FILENAME));
     try {
       database.exec(CREATE_TABLE);
+      database.exec(CREATE_MIGRATIONS);
+      const recordMigration = database.prepare(
+        "insert into kysely_migration (name, timestamp) values (?, ?)",
+      );
+      for (const name of migrations) {
+        recordMigration.run(name, "2026-09-18T00:00:00.000Z");
+      }
       const insert = database.prepare(
         `insert into branch_metadata (${COLUMNS.join(", ")}) values (${COLUMNS.map(() => "?").join(", ")})`,
       );

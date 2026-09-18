@@ -36,13 +36,34 @@ export type StackIssue =
       readonly recorded: readonly string[];
       readonly derived: readonly string[];
     }
-  | { readonly kind: "cycle"; readonly branches: readonly string[] };
+  | { readonly kind: "cycle"; readonly branches: readonly string[] }
+  | {
+      readonly kind: "schema_changed";
+      readonly unexpected: readonly string[];
+      readonly missing: readonly string[];
+    };
+
+/** Which Graphite migrations the database reports, against the set this reader was written for. */
+export interface MetadataSchema {
+  /** Applied migration ids. Empty when `kysely_migration` could not be read. */
+  readonly migrations: readonly string[];
+  /** Applied migrations this reader does not know about. */
+  readonly unexpected: readonly string[];
+  /** Migrations this reader expects and did not find. */
+  readonly missing: readonly string[];
+}
 
 export interface StackSnapshot {
   /** Absolute path to the repository's common git directory. */
   readonly gitCommonDir: string;
   /** The `trunk` field of `.graphite_repo_config`, or null when the file has none. */
   readonly trunk: string | null;
+  /**
+   * Graphite's schema as this database reports it. A non-empty `unexpected` or
+   * `missing` means Graphite changed its storage: trust the snapshot less, and
+   * re-verify docs/agents/graphite.md.
+   */
+  readonly schema: MetadataSchema;
   /** Every branch with a metadata row that survived validation, sorted by name. */
   readonly branches: readonly StackBranch[];
   /** Branches with no parent inside the snapshot. Members of a cycle are not roots. */

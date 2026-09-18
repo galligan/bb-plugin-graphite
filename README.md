@@ -13,13 +13,15 @@ stack has to shell out, parse human-readable output, and guess at state.
 
 ## What it does
 
-**Reads the stack from git, not from the CLI.** Graphite records its topology as git
-refs, so the stack graph, each branch's recorded head, and its validation state are
-all available as structured data. No output parsing, no interactive prompts, no auth.
+**Reads the stack from stored state, not from CLI output.** Graphite keeps its
+topology in a SQLite database inside your git directory, so the stack graph, each
+branch's recorded head, and its validation state are all available as structured
+data. No output parsing, no interactive prompts, no auth.
 
 **Reports what the CLI cannot.** Because the recorded head and the actual head are
 both readable, the plugin can tell you when Graphite's view of a branch is stale —
-something `gt log` does not print.
+something `gt log` does not print. It can only do that by *not* running `gt`: every
+`gt` command, including `gt log`, silently refreshes the recorded head first.
 
 **Drives the small set of operations stacked work needs.** `restack`, `submit`,
 `sync`, and `merge`, invoked non-interactively, with a working-tree check before
@@ -37,6 +39,25 @@ bb graphite stack --json     # the same snapshot, for agents
 
 Write verbs land after the read path is proven. See
 [`.agents/plans/20260918-init/`](.agents/plans/20260918-init/).
+
+## What it couples to
+
+This plugin reads `.graphite_metadata.db`, a private file Graphite writes inside your
+git directory. Graphite does not document it, version it, or offer an alternative:
+there is no `--json`, no export, and no machine-readable interop surface in the CLI as
+of `1.8.6`.
+
+Reading it is a deliberate trade. It is the only way to see a branch whose recorded
+head has fallen behind the repository, and it is the only structured source there is.
+The cost is that a Graphite release could change the schema.
+
+Two things bound that risk. The plugin opens the database **read-only** and never
+writes to it. And it checks Graphite's own migration list on every read, naming any
+migration it does not recognize rather than guessing. All Graphite repositories
+observed so far report the same three migrations, whose ids are dated within nine days
+of each other in early 2026; each database applies them when the CLI first opens it.
+
+If you are not comfortable with that coupling, do not install this plugin.
 
 ## Not in scope
 
