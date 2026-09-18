@@ -192,14 +192,18 @@ function TodosPage() {
 // plugins chapter).
 
 /**
- * The quiet default: one line above the composer, only when there is a stack to
- * report. The banner region collapses when this renders null, so an unstacked
- * branch costs no vertical space at all.
+ * The quiet default: one row above the composer, only when there is a stack to
+ * report. `chrome: "card"` gives it the same bounding BB's own diff bar uses, so
+ * the two rows line up; the inner classes mirror that bar's as well.
+ *
+ * Renders null when there is no stack, which collapses BB's banner region to
+ * zero height.
  */
 function StackBanner() {
   const rpc = useRpc<typeof rpcContract>();
   const { projectId, threadId } = useBbContext();
   const [stack, setStack] = useState<CurrentStack | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     if (projectId === null) {
@@ -222,19 +226,45 @@ function StackBanner() {
 
   if (stack === null || stack.outcome !== "stacked") return null;
 
-  const state = stack.needsRestack ? "needs restack" : stack.isStale ? "drifted" : null;
+  // Sentence case, so the row always opens on a capital the way BB's own do.
+  const state = stack.needsRestack ? "Needs restack" : stack.isStale ? "Drifted" : null;
 
   return (
-    // The branch name is already in the composer footer. Repeating it would make
-    // this row a second copy of a fact BB shows; it earns its place by carrying
-    // only what nothing else does — where in the stack, and whether it has drifted.
-    <div className="flex min-w-0 items-center gap-1.5 px-1 text-xs text-muted-foreground">
-      <StackPositionIcon position={stack.placement} className="size-3.5 shrink-0" />
-      <span className="shrink-0 tabular-nums">
-        {stack.position} of {stack.total}
-      </span>
-      {state !== null ? (
-        <span className="shrink-0 text-subtle-foreground">· {state}</span>
+    <div className="text-xs text-muted-foreground">
+      <button
+        type="button"
+        onClick={() => setExpanded((open) => !open)}
+        aria-expanded={expanded}
+        className="flex w-full items-center gap-0.5 rounded-md p-1 text-left hover:text-foreground"
+      >
+        <StackPositionIcon
+          position={stack.placement}
+          className="mx-1 size-3.5 shrink-0"
+        />
+        <span className="shrink-0 tabular-nums">
+          {stack.position}/{stack.total}
+        </span>
+        {state !== null ? (
+          <span className="ml-1.5 shrink-0 text-warning-text">{state}</span>
+        ) : null}
+      </button>
+      {expanded ? (
+        <ol className="border-t border-border px-2 py-1.5">
+          {[...stack.branches].reverse().map((branch) => (
+            <li
+              key={branch.name}
+              className={cn(
+                "flex items-center gap-2 py-0.5",
+                branch.isCurrent && "text-foreground",
+              )}
+            >
+              <span className="truncate font-mono">{branch.name}</span>
+              {branch.needsRestack ? (
+                <span className="shrink-0 text-warning-text">needs restack</span>
+              ) : null}
+            </li>
+          ))}
+        </ol>
       ) : null}
     </div>
   );
@@ -244,7 +274,7 @@ export default definePluginApp((app) => {
   for (const icon of STACK_ICON_REGISTRATIONS) app.experimental_icons.register(icon);
   app.composer.customize({
     id: "stack",
-    banners: [{ id: "stack-position", chrome: "bare", component: StackBanner }],
+    banners: [{ id: "stack-position", chrome: "card", component: StackBanner }],
   });
   app.slots.navPanel({
     id: "example-todos",
