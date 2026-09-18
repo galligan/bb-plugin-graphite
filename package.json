@@ -1,6 +1,11 @@
 {
   "name": "bb-plugin-graphite",
   "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/galligan/bb-plugin-graphite.git"
+  },
+  "license": "MIT",
   "type": "module",
   "engines": {
     "bb": ">=0.43",
