@@ -63,6 +63,7 @@ export const rpcContract = defineRpcContract({
             isStale: z.boolean(),
           }),
         ),
+        otherStacks: z.array(z.string()),
       }),
       z.object({ outcome: z.literal("none"), reason: z.string() }),
     ]),

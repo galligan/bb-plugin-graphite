@@ -33,6 +33,8 @@ export type CurrentStack =
       isStale: boolean;
       workingTree: string | null;
       branches: CurrentStackBranch[];
+      /** Tips of other stacks rooted on trunk. Context, not the subject. */
+      otherStacks: string[];
     }
   /** No stack to show: not a Graphite repo, branch untracked, or no environment. */
   | { outcome: "none"; reason: string };
@@ -76,6 +78,11 @@ export async function currentStack(
   const chain = stackChain(snapshot, checkout.branchName);
   if (chain === null) return none("branch is not tracked by Graphite");
 
+  // Other lines off trunk: sibling children of trunk that this chain does not use.
+  const inChain = new Set(chain.branches.map((branch) => branch.name));
+  const trunkBranch = snapshot.branches.find((branch) => branch.isTrunk);
+  const otherStacks = (trunkBranch?.children ?? []).filter((name) => !inChain.has(name));
+
   return {
     outcome: "stacked",
     branch: checkout.branchName,
@@ -91,5 +98,6 @@ export async function currentStack(
       needsRestack: branch.needsRestack,
       isStale: branch.isStale,
     })),
+    otherStacks,
   };
 }

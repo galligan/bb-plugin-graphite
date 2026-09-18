@@ -228,6 +228,9 @@ function StackBanner() {
 
   // Sentence case, so the row always opens on a capital the way BB's own do.
   const state = stack.needsRestack ? "Needs restack" : stack.isStale ? "Drifted" : null;
+  // Tip first, the way `gt ls` prints it: trunk is the last line, not the first.
+  const rows = [...stack.branches].reverse();
+  const trunkName = stack.branches[0]?.name ?? "trunk";
 
   return (
     // Structure copied from BB's own diff bar so the two rows share a baseline:
@@ -257,26 +260,92 @@ function StackBanner() {
           />
         </button>
       </div>
-      {expanded ? (
-        // Tip first, the way `gt ls` prints it. Indented to the icon column.
-        <ol className="border-t border-border p-1">
-          {[...stack.branches].reverse().map((branch) => (
-            <li
-              key={branch.name}
-              className={cn(
-                "flex items-center gap-1.5 px-2 py-0.5",
-                branch.isCurrent && "text-foreground",
-              )}
-            >
-              <span className="min-w-0 truncate font-mono">{branch.name}</span>
-              {branch.needsRestack ? (
-                <span className="shrink-0 text-warning-text">needs restack</span>
-              ) : null}
-            </li>
-          ))}
-        </ol>
-      ) : null}
+      <div
+        className={cn(
+          "grid overflow-hidden transition-[grid-template-rows,opacity,border-color] duration-200 ease-out",
+          expanded
+            ? "grid-rows-[1fr] border-t border-border opacity-100"
+            : "pointer-events-none grid-rows-[0fr] border-t border-transparent opacity-0",
+        )}
+      >
+        <div className="overflow-hidden bg-popover">
+          <ol className="max-h-56 overflow-auto px-3 pb-2 pt-1">
+            {rows.map((branch, index) => (
+              <li
+                key={branch.name}
+                className="grid grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-x-3 rounded px-1"
+              >
+                <LineageNode
+                  first={index === 0}
+                  last={index === rows.length - 1}
+                  current={branch.isCurrent}
+                />
+                <span
+                  className={cn(
+                    "truncate text-xs leading-5",
+                    branch.isCurrent
+                      ? "font-medium text-foreground"
+                      : "opacity-70",
+                  )}
+                >
+                  {branch.name}
+                </span>
+                {branch.needsRestack ? (
+                  <span className="shrink-0 text-xs leading-5 text-warning-text">
+                    needs restack
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+          {stack.otherStacks.length > 0 ? (
+            <p className="border-t border-border px-3 py-1.5 text-xs leading-5 text-subtle-foreground">
+              {stack.otherStacks.length} other stack
+              {stack.otherStacks.length === 1 ? "" : "s"} off{" "}
+              <span className="font-mono">{trunkName}</span>
+            </p>
+          ) : null}
+        </div>
+      </div>
     </div>
+  );
+}
+
+/**
+ * One node on the stack spine, in the 1.5rem column BB reserves for a row glyph.
+ * Reads like `gt ls`: a filled node for the branch you are on, hollow for the rest,
+ * joined by a continuous line so the lineage is visible rather than implied.
+ */
+function LineageNode({
+  first,
+  last,
+  current,
+}: {
+  readonly first: boolean;
+  readonly last: boolean;
+  readonly current: boolean;
+}) {
+  return (
+    <svg viewBox="0 0 24 20" className="h-5 w-6 shrink-0" aria-hidden="true">
+      <line
+        x1="12"
+        y1={first ? 10 : 0}
+        x2="12"
+        y2={last ? 10 : 20}
+        stroke="currentColor"
+        strokeWidth="1"
+        opacity="0.3"
+      />
+      <circle
+        cx="12"
+        cy="10"
+        r="3.5"
+        fill={current ? "currentColor" : "var(--popover)"}
+        stroke="currentColor"
+        strokeWidth="1.25"
+        opacity={current ? 1 : 0.55}
+      />
+    </svg>
   );
 }
 
