@@ -61,9 +61,20 @@ function findCycles(
 }
 
 export function buildStack(input: BuildStackInput): BuildStackResult {
-  const records = [...input.records].sort((a, b) => a.name.localeCompare(b.name));
-  const byName = new Map(records.map((record) => [record.name, record]));
+  const sorted = [...input.records].sort((a, b) => a.name.localeCompare(b.name));
   const issues: StackIssue[] = [];
+
+  // Graphite keeps a row after its branch is gone — 132 of 157 rows in
+  // ~/Developer/outfitter/skillset. Those are stale metadata, not branches: left in
+  // the graph they inflate every count (trunk showed 48 children where `gt ls` shows
+  // 5). They are reported, not carried.
+  const records: BranchRecord[] = [];
+  for (const record of sorted) {
+    if (input.heads.has(record.name)) records.push(record);
+    else issues.push({ kind: "missing_branch", branch: record.name });
+  }
+
+  const byName = new Map(records.map((record) => [record.name, record]));
 
   // Edges come from parent_branch_name only. The `children` column disagrees with it
   // in real repositories; see docs/agents/graphite.md.
@@ -90,7 +101,6 @@ export function buildStack(input: BuildStackInput): BuildStackResult {
   for (const record of records) {
     const children = [...(childrenOf.get(record.name) ?? [])].sort();
     const actualHead = input.heads.get(record.name) ?? null;
-    if (actualHead === null) issues.push({ kind: "missing_branch", branch: record.name });
 
     if (record.recordedChildren !== null) {
       const recorded = [...record.recordedChildren].sort();

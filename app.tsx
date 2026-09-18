@@ -268,12 +268,12 @@ function StackBanner() {
             : "pointer-events-none grid-rows-[0fr] border-t border-transparent opacity-0",
         )}
       >
-        <div className="overflow-hidden bg-popover">
-          <ol className="max-h-56 overflow-auto px-3 pb-2 pt-1">
+        <div className="overflow-hidden rounded-b-[7px] bg-popover">
+          <ol className="max-h-72 overflow-auto p-1">
             {rows.map((branch, index) => (
               <li
                 key={branch.name}
-                className="grid grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-x-3 rounded px-1"
+                className="grid grid-cols-[0.875rem_minmax(0,1fr)_auto] items-center gap-x-1.5 rounded px-2"
               >
                 <LineageNode
                   first={index === 0}
@@ -326,21 +326,20 @@ function LineageNode({
   readonly current: boolean;
 }) {
   return (
-    <svg viewBox="0 0 24 20" className="h-5 w-6 shrink-0" aria-hidden="true">
-      <line
-        x1="12"
-        y1={first ? 10 : 0}
-        x2="12"
-        y2={last ? 10 : 20}
-        stroke="currentColor"
-        strokeWidth="1"
-        opacity="0.3"
-      />
+    // The line stops short of each node rather than passing behind it, so a hollow
+    // node reads as a ring and not as a crossed-out circle.
+    <svg viewBox="0 0 14 20" className="h-5 w-3.5 shrink-0" aria-hidden="true">
+      {first ? null : (
+        <line x1="7" y1="0" x2="7" y2="5.5" stroke="currentColor" strokeWidth="1" opacity="0.3" />
+      )}
+      {last ? null : (
+        <line x1="7" y1="14.5" x2="7" y2="20" stroke="currentColor" strokeWidth="1" opacity="0.3" />
+      )}
       <circle
-        cx="12"
+        cx="7"
         cy="10"
-        r="3.5"
-        fill={current ? "currentColor" : "var(--popover)"}
+        r="3.25"
+        fill={current ? "currentColor" : "none"}
         stroke="currentColor"
         strokeWidth="1.25"
         opacity={current ? 1 : 0.55}

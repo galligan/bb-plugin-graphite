@@ -271,6 +271,17 @@ describe("readStack", () => {
       assert.equal(branch(snapshot, "feat-a").parent, "main");
     });
 
+    it("drops a row whose branch git no longer has, and says so", () => {
+      // Graphite keeps metadata for deleted branches; counting them inflates
+      // every total. `gt ls` does not show them and neither do we.
+      assert.ok(!snapshot.branches.some((candidate) => candidate.name === "ghost"));
+      assert.ok(
+        snapshot.issues.every(
+          (issue) => issue.kind !== "missing_branch" || issue.branch !== "feat-a",
+        ),
+      );
+    });
+
     it("reports a parent that has no row and treats the branch as a root", () => {
       assert.deepEqual(
         snapshot.issues.filter((issue) => issue.kind === "missing_parent"),
