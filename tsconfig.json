@@ -1,6 +1,8 @@
 {
   "compilerOptions": {
     "strict": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",

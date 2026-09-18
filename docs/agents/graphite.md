@@ -240,3 +240,6 @@ Verified against BB `0.43.1` and the plugin store on 2026-09-18:
   submit primitive.
 - `bb.sdk.terminals` is an interactive PTY, not exec-and-capture. It is not the path
   for running `gt`.
+- The BB server process is Electron `41.7.0` on Node `24.15.0`. `node:sqlite` is
+  available there unflagged, so a plugin can read Graphite's metadata database with
+  no native dependency. Verified 2026-09-18 with `ELECTRON_RUN_AS_NODE=1`.
