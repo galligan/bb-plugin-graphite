@@ -77,7 +77,9 @@ const USAGE = [
   "Acts on the current thread's environment. Outside a thread, name one with",
   "--project <id> or --thread <id>.",
   "",
-  "Every write verb refuses a working tree that is not clean unless --force.",
+  "A write verb refuses a working tree that could lose work — dirty_uncommitted,",
+  "committed_unmerged, dirty_and_committed_unmerged, or a state it does not",
+  "recognise — unless you pass --force. clean and untracked proceed.",
 ].join("\n");
 
 export default async function plugin(bb: BbPluginApi) {
