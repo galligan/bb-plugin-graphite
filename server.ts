@@ -17,6 +17,7 @@ import { z } from "zod";
 
 import { currentStack } from "./lib/current-stack.ts";
 import { renderStack } from "./lib/render-stack.ts";
+import { submitArgs } from "./lib/submit-args.ts";
 import { runVerb, type VerbName } from "./lib/verbs.ts";
 
 const threadSchema = z.object({ id: z.string(), title: z.string() });
@@ -70,9 +71,14 @@ const USAGE = [
   "Usage:",
   "  bb graphite stack [--json]      the stack around the checked-out branch",
   "  bb graphite restack [--force]   rebase the stack onto its parents",
-  "  bb graphite submit [--force]    push the stack and open or update its PRs",
+  "  bb graphite submit [options]    push the stack and open or update its PRs",
   "  bb graphite sync [--force]      pull trunk, restack, drop merged branches",
   "  bb graphite merge [--force]     merge the stack in order",
+  "",
+  "submit options:",
+  "  --publish            open the PRs for review; without it they are drafts",
+  "  --merge-when-ready   let each PR merge once its checks pass",
+  "  --update-only        push and update PRs that already exist; open none",
   "",
   "Acts on the current thread's environment. Outside a thread, name one with",
   "--project <id> or --thread <id>.",
@@ -119,33 +125,46 @@ export default async function plugin(bb: BbPluginApi) {
     commands: [
       { name: "stack", summary: "Show the stack around the checked-out branch", usage: "bb graphite stack [--json]" },
       { name: "restack", summary: "Rebase the stack onto its parents", usage: "bb graphite restack [--force]" },
-      { name: "submit", summary: "Push the stack and open or update its PRs", usage: "bb graphite submit [--force]" },
+      {
+        name: "submit",
+        summary:
+          "Push the stack and open or update its PRs. New PRs are drafts unless --publish",
+        usage:
+          "bb graphite submit [--publish] [--merge-when-ready] [--update-only] [--force]",
+      },
       { name: "sync", summary: "Pull trunk, restack, drop merged branches", usage: "bb graphite sync [--force]" },
       { name: "merge", summary: "Merge the stack in order", usage: "bb graphite merge [--force]" },
     ],
     async run(argv, ctx) {
       const [command, ...rest] = argv;
-      const json = rest.includes("--json");
-      const force = rest.includes("--force");
-      // Outside a thread there is no environment to infer, so let the caller name one.
-      const flagValue = (flag: string): string | null => {
-        const at = rest.indexOf(flag);
-        return at === -1 ? null : (rest[at + 1] ?? null);
-      };
-      const projectFlag = flagValue("--project");
-      const threadFlag = flagValue("--thread");
-      const consumed = new Set([
-        "--json",
-        "--force",
-        "--project",
-        "--thread",
-        projectFlag ?? "",
-        threadFlag ?? "",
-      ]);
-      const passthrough = rest.filter((arg) => !consumed.has(arg));
-
       if (command === undefined || command === "help" || command === "--help") {
         return { exitCode: 0, stdout: USAGE };
+      }
+      // A leading flag means no command was given. Saying "unknown command: --project"
+      // sends the reader looking for a command by that name.
+      if (command.startsWith("-")) {
+        return { exitCode: 1, stderr: `No command given.\n\n${USAGE}` };
+      }
+      let json = false;
+      let force = false;
+      let projectFlag: string | null = null;
+      let threadFlag: string | null = null;
+      const passthrough: string[] = [];
+      for (let i = 0; i < rest.length; i++) {
+        const arg = rest[i];
+        if (arg === "--json") json = true;
+        else if (arg === "--force") force = true;
+        else if (arg === "--project" || arg === "--thread") {
+          const value = rest[++i];
+          if (value === undefined || value.startsWith("-")) {
+            return { exitCode: 1, stderr: `${arg} needs an id.` };
+          }
+          if (arg === "--project") projectFlag = value;
+          else threadFlag = value;
+        } else passthrough.push(arg);
+      }
+      if (json && command !== "stack") {
+        return { exitCode: 1, stderr: "--json is only supported by stack." };
       }
       const projectId = projectFlag ?? ctx.projectId ?? null;
       if (projectId == null) {
@@ -175,10 +194,15 @@ export default async function plugin(bb: BbPluginApi) {
         return { exitCode: 1, stderr: `Unknown command: ${command}\n\n${USAGE}` };
       }
 
+      const submitted = verb === "submit" ? submitArgs(passthrough) : null;
+      if (submitted !== null && !submitted.ok) {
+        return { exitCode: 1, stderr: submitted.error };
+      }
+
       const result = await runVerb(bb, {
         ...request,
         verb,
-        args: passthrough,
+        args: submitted?.args ?? passthrough,
         force,
         signal: ctx.signal,
       });

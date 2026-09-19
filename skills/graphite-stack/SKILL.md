@@ -27,12 +27,22 @@ bb graphite stack --json   # the same snapshot, structured
 
 ```sh
 bb graphite restack        # rebase the stack onto its parents
-bb graphite submit         # push the stack, open or update its PRs
+bb graphite submit         # push the stack; new PRs default to drafts
 bb graphite sync           # pull trunk, restack, drop merged branches
 bb graphite merge          # merge the stack in order
 ```
 
-- Every write verb refuses a working tree that is not `clean`.
+`submit` takes `--publish`, `--merge-when-ready`, and `--update-only`.
+
+- `submit` opens new PRs as **drafts**. That is `gt`'s behaviour when it cannot
+  prompt, and this command never prompts.
+- `--publish` opens them for review. MUST NOT pass it unless the user asked for the
+  PRs to be published. Report that the PRs are drafts and let them decide.
+- `--merge-when-ready` lets each PR merge itself once its checks pass. MUST NOT pass
+  it unless the user asked for that specific behaviour.
+
+- Every write verb refuses a working tree that could lose work. `clean` and
+  `untracked` proceed; dirty or unknown states are refused.
 - If a verb refuses, report the reason. MUST NOT pass `--force` to get past it
   unless the user asked for that specific verb to proceed on a dirty tree.
 - Each verb runs `gt` non-interactively. It cannot prompt, so it cannot hang.

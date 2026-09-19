@@ -250,6 +250,12 @@ Verified 2026-09-19 against Graphite CLI `1.8.6`, submitting a two-branch stack 
 - Without `--publish`, newly created PRs are drafts. A resubmission can also update
   existing PRs; its effect on an existing PR's readiness has not been verified.
   Check the PR's state before reporting it or changing its readiness.
+- `gt submit -p` / `--publish` publishes the PRs being submitted. `-d` / `--draft`
+  forces drafts explicitly, `-u` / `--update-only` pushes and updates only branches
+  that already have a PR, and `-m` / `--merge-when-ready` marks each PR to merge once
+  its checks pass. Read from `gt submit --help` at `1.8.6`.
+- `bb.sdk.environments.markPullRequestReady` is the other way to take a PR out of
+  draft, without `gt`.
 
 ### Corrections to widely-repeated guidance
 
