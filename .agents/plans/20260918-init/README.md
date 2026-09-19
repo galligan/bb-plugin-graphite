@@ -4,9 +4,12 @@
 composer banner, which grew out of step 4 and now carries the lineage view. What it
 still calls for and has not been done:
 
-- `submit` and `merge` against a real remote. Both are exercised only to the guard;
-  neither has pushed or merged anything. Deliberately so — the first real run should
-  be observed, not a checkbox.
+- `merge` against a real remote. Exercised only to the guard; it has merged nothing.
+  Deliberately so — the first real run should be observed, not a checkbox.
+- `submit` is done: on 2026-09-19 it pushed a two-branch stack to
+  `galligan/bb-plugin-graphite` and opened PRs #1 and #2, correctly based on each
+  other. It also surfaced that `gt submit --no-interactive` always creates drafts,
+  now recorded in `docs/agents/graphite.md`.
 - `restack` and `sync` have run against the scratch stack, on a clean tree, on an
   untracked tree, and against the refusal path.
 - The multi-machine `bb.host` path. `lib/stack/` is kept free of SDK imports so it

@@ -235,6 +235,22 @@ An agent MUST NOT invoke `gt` in a form that can prompt.
 - Pass `--message` / `-m` to `gt create` and `gt modify` so the command never waits
   on an editor.
 
+### `gt submit --no-interactive` creates drafts
+
+Verified 2026-09-19 against Graphite CLI `1.8.6`, submitting a two-branch stack to
+`galligan/bb-plugin-graphite`.
+
+- `gt submit --no-interactive` prints `Running in non-interactive mode. Inline
+  prompts to fill PR fields will be skipped and new PRs will be created in draft
+  mode.` and creates every new PR as a draft.
+- It takes the PR title and body from the branch's commit message. There is no
+  prompt to skip past, so the command cannot hang.
+- It sets each PR's base to its Graphite parent, so a stack arrives on GitHub
+  already stacked. Verified: `#2 → fix/usage-text-matches-guard`, `#1 → main`.
+- Without `--publish`, newly created PRs are drafts. A resubmission can also update
+  existing PRs; its effect on an existing PR's readiness has not been verified.
+  Check the PR's state before reporting it or changing its readiness.
+
 ### Corrections to widely-repeated guidance
 
 Two errors appear in `~/.config/claude/rules/graphite.md`. Do not inherit them.
