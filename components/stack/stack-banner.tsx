@@ -32,24 +32,42 @@ export function StackBanner() {
       setStack(null);
       return;
     }
+    setStack(null);
     let live = true;
-    rpc.call("stack_current", { projectId, threadId }).then(
-      (result) => {
+    let pending = false;
+    const refresh = async () => {
+      if (!live || pending || document.visibilityState === "hidden") return;
+      pending = true;
+      try {
+        const result = await rpc.call("stack_current", { projectId, threadId });
         if (live) setStack(result);
-      },
-      () => {
+      } catch {
         if (live) setStack(null);
-      },
-    );
+      } finally {
+        pending = false;
+      }
+    };
+    void refresh();
+    // `gt` can change metadata without changing the route or remounting this banner.
+    const timer = window.setInterval(() => void refresh(), 15_000);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       live = false;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [rpc, projectId, threadId]);
 
   if (stack === null || stack.outcome !== "stacked") return null;
 
   // Sentence case, so the row always opens on a capital the way BB's own do.
-  const state = stack.needsRestack ? "Needs restack" : stack.isStale ? "Drifted" : null;
+  let state: string | null = null;
+  if (stack.warnings.length > 0) state = "Metadata changed";
+  else if (stack.needsRestack) state = "Needs restack";
+  else if (stack.isStale) state = "Drifted";
   // Tip first, the way `gt ls` prints it: trunk is the last line, not the first.
   const rows = [...stack.branches].reverse();
   // One lane width for every row, so branch names line up whether or not the row
@@ -99,6 +117,9 @@ export function StackBanner() {
       >
         <div className="overflow-hidden rounded-b-[7px] bg-popover">
           <ol className="max-h-72 overflow-auto p-1">
+            {stack.warnings.map((warning) => (
+              <li key={warning} className="px-2 py-1 text-warning-text">{warning}</li>
+            ))}
             {rows.map((branch, index) => (
               <StackRow
                 key={branch.name}
