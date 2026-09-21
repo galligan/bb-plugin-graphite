@@ -19,6 +19,18 @@ export function summarizeStack(snapshot: StackSnapshot, branchName: string): Hos
       `missing [${migrations(snapshot.schema.missing)}]`,
     );
   }
+  const issues = snapshot.issues.filter((issue) => issue.kind !== "schema_changed");
+  if (issues.length > 0) {
+    const labels = issues.slice(0, 3).map((issue) => {
+      const branch = "branch" in issue ? issue.branch : issue.kind === "cycle" ? issue.branches.join(", ") : null;
+      const name = branch?.replace(/\s+/g, " ").slice(0, 120);
+      return issue.kind.replaceAll("_", " ") + (name ? ` (${name})` : "");
+    });
+    warnings.push(
+      `Graphite metadata has ${issues.length} issue(s): ${labels.join(", ")}` +
+      (issues.length > 3 ? `, and ${issues.length - 3} more` : ""),
+    );
+  }
 
   return {
     outcome: "stacked",

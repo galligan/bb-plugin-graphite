@@ -22,11 +22,15 @@ it("reports Graphite migration changes in the returned stack", () => {
     }],
     roots: ["main"],
     cycles: [],
-    issues: [{ kind: "schema_changed", unexpected: ["new_migration"], missing: [] }],
+    issues: [
+      { kind: "schema_changed", unexpected: ["new_migration"], missing: [] },
+      { kind: "missing_parent", branch: "feature", parent: "gone" },
+    ],
   };
   const result = summarizeStack(snapshot, "main");
   assert.equal(result.outcome, "stacked");
   if (result.outcome === "stacked") {
     assert.match(result.warnings[0], /new_migration/);
+    assert.match(result.warnings[1], /missing parent \(feature\)/);
   }
 });
