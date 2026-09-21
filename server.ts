@@ -76,7 +76,7 @@ const USAGE = [
   "  bb graphite merge [--force]     merge the stack in order",
   "",
   "submit options:",
-  "  --publish            open the PRs for review; without it they are drafts",
+  "  --publish            publish submitted PRs; new PRs default to drafts",
   "  --merge-when-ready   let each PR merge once its checks pass",
   "  --update-only        push and update PRs that already exist; open none",
   "",
