@@ -59,7 +59,8 @@ export function stackChain(
 ): StackChain | null {
   const byName = new Map(snapshot.branches.map((branch) => [branch.name, branch]));
   const start = byName.get(branchName);
-  if (start === undefined) return null;
+  // Graphite also keeps metadata rows for branches it has seen but has not tracked.
+  if (start === undefined || (start.parent === null && !start.isTrunk)) return null;
 
   const inCycle = new Set(snapshot.cycles.flat());
 

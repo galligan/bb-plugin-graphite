@@ -200,20 +200,15 @@ See the `bb-plugin-dev` skill for the full response shape.
 
 ## Write through the `gt` CLI
 
-`node:child_process.execFile` works from plugin backend code. Model the helper on
-`gh-stack`'s, at
-`~/Developer/bb/community/smsunarto-bb-plugins/plugins/gh-stack/server.ts:362`: pass
-`cwd`, a timeout, and a `maxBuffer`, and resolve a result object rather than
-throwing.
+`node:child_process.execFile` runs inside the plugin's `bb.host` entry on the
+environment's enrolled machine. Pass `cwd`, a timeout, and a `maxBuffer`, and
+resolve a result object rather than throwing.
 
 Two rules:
 
-- `execFile` runs on the **BB server**. That is correct for a server-local
-  workspace. For a workspace on an enrolled remote machine it silently runs against
-  the wrong host. Either document the single-machine limitation or put the call in a
-  `bb.host` module.
-- `gt` is at `/Users/mg/.local/share/npm/bin/gt`. It may be absent from the server
-  process's `PATH`. Resolve the binary; do not assume it is on `PATH`.
+- Run reads and writes on `environment.hostId`; a path supplied by BB names that
+  host's filesystem, not necessarily the BB server's.
+- Resolve `gt` on the workspace host. It may be absent from that host's `PATH`.
 
 ## Command reference
 
@@ -287,6 +282,6 @@ Verified against BB `0.43.1` and the plugin store on 2026-09-18:
   submit primitive.
 - `bb.sdk.terminals` is an interactive PTY, not exec-and-capture. It is not the path
   for running `gt`.
-- The BB server process is Electron `41.7.0` on Node `24.15.0`. `node:sqlite` is
-  available there unflagged, so a plugin can read Graphite's metadata database with
+- The installed BB host runtime uses Node `24.15.0`. `node:sqlite` is available
+  there unflagged, so the host entry can read Graphite's metadata database with
   no native dependency. Verified 2026-09-18 with `ELECTRON_RUN_AS_NODE=1`.

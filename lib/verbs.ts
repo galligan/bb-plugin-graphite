@@ -8,7 +8,7 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 
 import { resolveEnvironment, type CurrentStackRequest } from "./current-stack.ts";
-import { runGt } from "./gt.ts";
+import { graphiteHostContract } from "./host-contract.ts";
 
 export type VerbName = "restack" | "submit" | "sync" | "merge";
 
@@ -76,7 +76,16 @@ export async function runVerb(bb: BbPluginApi, request: VerbRequest): Promise<Ve
   const args = [request.verb, ...(request.args ?? [])];
   if (FORCE_FLAG[request.verb]) args.push("-f");
 
-  const result = await runGt(args, { cwd: environment.path, signal: request.signal });
+  let result;
+  try {
+    result = await bb.hosts.experimental_client({ contract: graphiteHostContract }).call(
+      "gt",
+      { cwd: environment.path, args },
+      { hostId: environment.hostId, signal: request.signal, timeoutMs: 125_000 },
+    );
+  } catch {
+    return { outcome: "unavailable", reason: "workspace host is unavailable" };
+  }
   if (result.outcome === "not_found") {
     return {
       outcome: "unavailable",

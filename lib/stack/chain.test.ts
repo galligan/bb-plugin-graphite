@@ -146,5 +146,10 @@ describe("stackChain", () => {
 
   it("returns null for a branch Graphite does not track", () => {
     assert.equal(stackChain(linear, "untracked"), null);
+    const seenButUntracked = snapshot([
+      record("main", null),
+      record("x", null, { validation: "BAD_PARENT_NAME" }),
+    ]);
+    assert.equal(stackChain(seenButUntracked, "x"), null);
   });
 });

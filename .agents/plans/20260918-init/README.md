@@ -12,9 +12,8 @@ still calls for and has not been done:
   now recorded in `docs/agents/graphite.md`.
 - `restack` and `sync` have run against the scratch stack, on a clean tree, on an
   untracked tree, and against the refusal path.
-- The multi-machine `bb.host` path. `lib/stack/` is kept free of SDK imports so it
-  can move into a host entry; the entry is not built, and should not be on
-  speculation.
+- The multi-machine `bb.host` path is built as a follow-up: Graphite reads and
+  commands now run on the environment's enrolled host.
 - The banner's hover pill was verified once by DOM inspection and one screenshot,
   not by an automated check. The lineage columns and elbows were compared against
   `gt ls` on a scratch stack with two columns and a nested fork. No UI is covered
@@ -109,8 +108,8 @@ been exercised.
 - A UI panel. The CLI comes first; see the `bb-plugin-design` skill for the reason.
 - Conflict resolution.
 - Automatic merge policy.
-- Multi-machine correctness. Document the server-local limitation rather than
-  solving it now; a `bb.host` module can come later.
+- Multi-machine correctness was deferred from this initial slice and added in a
+  later safety pass.
 
 ## Open questions
 
