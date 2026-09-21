@@ -81,7 +81,8 @@ const USAGE = [
   "  --update-only        push and update PRs that already exist; open none",
   "",
   "Acts on the current thread's environment. Outside a thread, name one with",
-  "--project <id> or --thread <id>.",
+  "--project <id> or --thread <id>. Projects with multiple environments need",
+  "an explicit thread.",
   "",
   "A write verb refuses a working tree that could lose work — dirty_uncommitted,",
   "committed_unmerged, dirty_and_committed_unmerged, or a state it does not",
@@ -166,7 +167,12 @@ export default async function plugin(bb: BbPluginApi) {
       if (json && command !== "stack") {
         return { exitCode: 1, stderr: "--json is only supported by stack." };
       }
-      const projectId = projectFlag ?? ctx.projectId ?? null;
+      const targetThreadId = threadFlag ?? ctx.threadId ?? null;
+      let projectId = projectFlag ?? ctx.projectId ?? null;
+      if (projectId === null && targetThreadId !== null) {
+        const thread = await bb.sdk.threads.get({ threadId: targetThreadId }).catch(() => null);
+        projectId = thread?.projectId ?? null;
+      }
       if (projectId == null) {
         return {
           exitCode: 1,

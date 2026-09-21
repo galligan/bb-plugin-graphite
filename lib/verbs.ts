@@ -60,6 +60,10 @@ export async function runVerb(bb: BbPluginApi, request: VerbRequest): Promise<Ve
   }
   const environment = resolution.environment;
 
+  if (request.verb === "sync" && environment.isWorktree) {
+    return { outcome: "refused", reason: "gt sync cannot run in a git worktree; fetch and restack instead" };
+  }
+
   if (blocksWrite(environment.workingTree) && request.force !== true) {
     return {
       outcome: "refused",
