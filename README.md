@@ -52,8 +52,12 @@ Every write verb refuses a working tree that could lose work —
 state it does not recognise — unless you pass `--force`. `clean` and `untracked`
 proceed.
 
-**Not yet exercised:** `submit` and `merge` have been run only as far as the guard.
-Neither has touched a real remote. Treat the first real use as deliberate. See [`.agents/plans/20260918-init/`](.agents/plans/20260918-init/).
+**Not yet exercised:** `merge` has been run only as far as the guard and has merged
+nothing. Treat the first real use as deliberate.
+
+`submit` is verified against a real remote: it pushed a two-branch stack to this
+repository and opened both PRs correctly based on each other. Note that `gt` creates
+PRs as drafts when run non-interactively, which is what this plugin always does. See [`.agents/plans/20260918-init/`](.agents/plans/20260918-init/).
 
 ## What it couples to
 
