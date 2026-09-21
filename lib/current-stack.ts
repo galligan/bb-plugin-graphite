@@ -65,6 +65,8 @@ function none(reason: string): CurrentStack {
 export interface ResolvedEnvironment {
   readonly id: string;
   readonly path: string;
+  readonly hostId: string;
+  readonly isWorktree: boolean;
   readonly branchName: string;
   readonly workingTree: string;
 }
@@ -84,16 +86,20 @@ export async function resolveEnvironment(
 
   let chosen = environments[0];
   if (request.threadId != null) {
-    // A thread id that does not resolve is not fatal: fall back to the project's
-    // first environment rather than failing the whole command.
     const thread = await bb.sdk.threads
       .get({ threadId: request.threadId })
       .catch(() => null);
+    if (thread === null) {
+      return { outcome: "unavailable", reason: `thread ${request.threadId} was not found` };
+    }
     const match =
-      thread === null
-        ? undefined
-        : environments.find((candidate) => candidate.id === thread.environmentId);
-    if (match !== undefined) chosen = match;
+      environments.find((candidate) => candidate.id === thread.environmentId);
+    if (match === undefined) {
+      return { outcome: "unavailable", reason: "thread is not in this project's environments" };
+    }
+    chosen = match;
+  } else if (environments.length > 1) {
+    return { outcome: "unavailable", reason: "project has multiple environments; pass --thread <id>" };
   }
 
   const path = chosen.path;
@@ -115,6 +121,8 @@ export async function resolveEnvironment(
     environment: {
       id: chosen.id,
       path,
+      hostId: chosen.hostId,
+      isWorktree: chosen.isWorktree,
       branchName: checkout.branchName,
       workingTree: status.workspace.workingTree.state,
     },
