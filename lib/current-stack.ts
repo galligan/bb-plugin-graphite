@@ -5,7 +5,7 @@
 
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 
-import { readStack, StackReadError, stackChain, stackOffshoots } from "./stack/index.ts";
+import { graphiteHostContract } from "./host-contract.ts";
 
 export interface CurrentStackRequest {
   readonly projectId: string;
@@ -52,6 +52,7 @@ export type CurrentStack =
       needsRestack: boolean;
       isStale: boolean;
       workingTree: string | null;
+      warnings: string[];
       branches: CurrentStackBranch[];
     }
   /** No stack to show: not a Graphite repo, branch untracked, or no environment. */
@@ -137,18 +138,17 @@ export async function currentStack(
   if (resolution.outcome !== "resolved") return none(resolution.reason);
   const environment = resolution.environment;
 
-  let snapshot;
+  let stack;
   try {
-    snapshot = await readStack({ repoPath: environment.path });
-  } catch (cause) {
-    if (cause instanceof StackReadError) return none(cause.code.replaceAll("_", " "));
-    throw cause;
+    stack = await bb.hosts.experimental_client({ contract: graphiteHostContract }).call(
+      "stack",
+      { repoPath: environment.path, branchName: environment.branchName },
+      { hostId: environment.hostId, timeoutMs: 10_000 },
+    );
+  } catch {
+    return none("workspace host is unavailable");
   }
-
-  const chain = stackChain(snapshot, environment.branchName);
-  if (chain === null) return none("branch is not tracked by Graphite");
-
-  const inChain = new Set(chain.branches.map((branch) => branch.name));
+  if (stack.outcome === "none") return none(stack.reason);
 
   // Which thread is working on which branch — the join neither tool has alone.
   // Graphite cannot see BB's threads; BB does not know the branches form a stack.
@@ -178,19 +178,20 @@ export async function currentStack(
   return {
     outcome: "stacked",
     branch: environment.branchName,
-    position: chain.position,
-    total: chain.total,
-    placement: chain.placement,
-    needsRestack: chain.needsRestack,
-    isStale: chain.isStale,
+    position: stack.position,
+    total: stack.total,
+    placement: stack.placement,
+    needsRestack: stack.needsRestack,
+    isStale: stack.isStale,
     workingTree: environment.workingTree,
-    branches: chain.branches.map((branch) => ({
+    warnings: stack.warnings,
+    branches: stack.branches.map((branch) => ({
       name: branch.name,
-      isCurrent: branch.name === environment.branchName,
+      isCurrent: branch.isCurrent,
       needsRestack: branch.needsRestack,
       isStale: branch.isStale,
       threads: threadsFor(branch.name),
-      offshoots: stackOffshoots(snapshot, inChain, branch.name).map((offshoot) => ({
+      offshoots: branch.offshoots.map((offshoot) => ({
         ...offshoot,
         threads: threadsFor(offshoot.name),
       })),

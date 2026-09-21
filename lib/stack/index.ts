@@ -13,7 +13,7 @@ import type { StackSnapshot } from "./types.ts";
 export interface ReadStackOptions {
   /** Any path inside the repository or one of its worktrees. */
   readonly repoPath: string;
-  /** Absolute path to git when it is not on the server process's PATH. */
+  /** Absolute path to git when it is not on the workspace host's PATH. */
   readonly gitBinary?: string;
 }
 

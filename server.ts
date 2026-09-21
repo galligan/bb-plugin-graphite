@@ -31,6 +31,7 @@ const stackedSchema = z.object({
   needsRestack: z.boolean(),
   isStale: z.boolean(),
   workingTree: z.string().nullable(),
+  warnings: z.array(z.string()),
   branches: z.array(
     z.object({
       name: z.string(),

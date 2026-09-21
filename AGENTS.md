@@ -2,20 +2,21 @@
 
 `bb-plugin-graphite` reads and drives Graphite stacks from BB.
 
-Status: the read path is built and the write verbs are in. The stock `bb plugin new`
-todo example is gone.
+Status: the read path and write verbs are built. `merge` has not yet been exercised
+against a real remote.
 
 - `lib/stack/` — pure reader over Graphite's metadata. No BB SDK, no `gt`, unit
   tested without a daemon.
-- `lib/current-stack.ts` — the only place the SDK and the reader meet.
-- `lib/gt.ts`, `lib/verbs.ts` — the write path and the guard in front of it.
+- `host.ts`, `lib/host-stack.ts` — read the workspace host's Graphite metadata.
+- `lib/current-stack.ts` — joins the host's stack with BB threads.
+- `lib/gt.ts`, `lib/verbs.ts` — host-side `gt` execution and the server-side guard.
 - `server.ts` — the RPC, `bb graphite …`, and the `graphite_stack` agent tool.
 - `app.tsx`, `components/stack/` — the composer banner.
 
 ## Read first
 
 - [`docs/agents/graphite.md`](docs/agents/graphite.md) — what Graphite exposes, how to
-  read the stack from git refs, which `gt` invocations are safe, and the gaps in BB.
+  read the stack from metadata, which `gt` invocations are safe, and the gaps in BB.
   Written for agents.
 - The `bb-plugin-dev` skill — verified BB SDK behavior, destructive hazards, and
   multi-machine rules. Covers what the built-in `bb-plugin-authoring` skill does not.
@@ -39,7 +40,10 @@ todo example is gone.
   A rebase does not touch untracked files, and refusing there only teaches the
   operator that `--force` is routine. The predicate is `blocksWrite` in
   `lib/verbs.ts`.
-- Resolve the `gt` binary path. Do not assume it is on the server process's `PATH`.
+- Run repository reads and `gt` on the environment's host through `bb.host`.
+- Resolve the `gt` binary path on that host. Do not assume it is on `PATH`.
+- Refuse `gt sync` in a linked worktree. An explicit thread must resolve to that
+  project's environment before any write verb runs.
 
 ## Conventions
 

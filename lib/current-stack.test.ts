@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 
-import { resolveEnvironment } from "./current-stack.ts";
+import { currentStack, resolveEnvironment } from "./current-stack.ts";
 import { runVerb } from "./verbs.ts";
 
 function bbWithEnvironments(
   environments: Array<{ id: string; isWorktree?: boolean }>,
   threadEnvironmentId: string | null,
+  onHostCall?: (method: string, hostId: string) => void,
 ): BbPluginApi {
   const bb = {
     sdk: {
@@ -30,11 +31,33 @@ function bbWithEnvironments(
         },
       },
       threads: {
+        list: async () => [],
         get: async () => {
           if (threadEnvironmentId === null) throw new Error("not found");
           return { environmentId: threadEnvironmentId };
         },
       },
+    },
+    hosts: {
+      experimental_client: () => ({
+        call: async (method: string, _input: unknown, options: { hostId: string }) => {
+          onHostCall?.(method, options.hostId);
+          if (method === "stack") {
+            return {
+              outcome: "stacked",
+              branch: "feature",
+              position: 2,
+              total: 2,
+              placement: "top",
+              needsRestack: false,
+              isStale: false,
+              warnings: [],
+              branches: [],
+            };
+          }
+          return { outcome: "ran", exitCode: 0, stdout: "", stderr: "" };
+        },
+      }),
     },
   };
   // The test supplies only the SDK methods exercised by resolution.
@@ -81,5 +104,17 @@ describe("environment targeting", () => {
       outcome: "refused",
       reason: "gt sync cannot run in a git worktree; fetch and restack instead",
     });
+  });
+
+  it("runs Graphite on the environment's host", async () => {
+    const calls: string[] = [];
+    const bb = bbWithEnvironments([{ id: "remote" }], "remote", (method, hostId) => {
+      calls.push(`${method}:${hostId}`);
+    });
+    const stack = await currentStack(bb, { projectId: "project", threadId: "thread" });
+    assert.equal(stack.outcome, "stacked");
+    const verb = await runVerb(bb, { projectId: "project", threadId: "thread", verb: "restack" });
+    assert.equal(verb.outcome, "ran");
+    assert.deepEqual(calls, ["stack:host-1", "gt:host-1"]);
   });
 });

@@ -23,6 +23,9 @@ export function renderStack(stack: CurrentStack): string {
     "",
   ];
 
+  for (const warning of stack.warnings) lines.push(`Warning: ${warning}`);
+  if (stack.warnings.length > 0) lines.push("");
+
   for (const branch of [...stack.branches].reverse()) {
     const flags: string[] = [];
     if (branch.needsRestack) flags.push("needs restack");

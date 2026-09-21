@@ -34,18 +34,12 @@ something `gt log` does not print. It can only do that by *not* running `gt`: ev
 `gt` command, including `gt log`, silently refreshes the recorded head first.
 
 **Drives the small set of operations stacked work needs.** `restack`, `submit`,
-`sync`, and `merge`, invoked non-interactively, with a working-tree check before
-anything destructive.
+`sync`, and `merge`, invoked non-interactively on the machine that owns the workspace,
+with a working-tree check before anything destructive. `sync` refuses linked
+worktrees.
 
 **Answers to agents and people the same way.** One snapshot, rendered as text for a
 terminal and as `--json` for an agent.
-
-## Planned surface
-
-```sh
-bb graphite stack            # the current stack, with head, state, and staleness
-bb graphite stack --json     # the same snapshot, for agents
-```
 
 Every write verb refuses a working tree that could lose work —
 `dirty_uncommitted`, `committed_unmerged`, `dirty_and_committed_unmerged`, or a
@@ -57,7 +51,8 @@ nothing. Treat the first real use as deliberate.
 
 `submit` is verified against a real remote: it pushed a two-branch stack to this
 repository and opened both PRs correctly based on each other. Note that `gt` creates
-PRs as drafts when run non-interactively, which is what this plugin always does. See [`.agents/plans/20260918-init/`](.agents/plans/20260918-init/).
+new PRs as drafts when run non-interactively without `--publish`. Check existing
+PRs before reporting their readiness. See [`.agents/plans/20260918-init/`](.agents/plans/20260918-init/).
 
 ## What it couples to
 
@@ -71,8 +66,8 @@ head has fallen behind the repository, and it is the only structured source ther
 The cost is that a Graphite release could change the schema.
 
 Two things bound that risk. The plugin opens the database **read-only** and never
-writes to it. And it checks Graphite's own migration list on every read, naming any
-migration it does not recognize rather than guessing. All Graphite repositories
+writes to it. And it checks Graphite's own migration list on every read, warning about
+any migration it does not recognize. All Graphite repositories
 observed so far report the same three migrations, whose ids are dated within nine days
 of each other in early 2026; each database applies them when the CLI first opens it.
 

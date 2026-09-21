@@ -2,7 +2,7 @@
 //
 // Two rules from docs/agents/graphite.md, both learned the hard way:
 //
-//   - `gt` is not necessarily on the server process's PATH. Resolve it.
+//   - `gt` is not necessarily on the workspace host's PATH. Resolve it.
 //   - `gt` MUST NOT be invoked in a form that can prompt. `--no-interactive`
 //     always; `-f` on the verbs that ask. `gt merge --confirm` *asks*, despite
 //     what the flag looks like, and fails outright in a non-interactive session.
