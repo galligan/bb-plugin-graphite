@@ -1,21 +1,20 @@
-Keep a todo list beside the work it belongs to, in the sidebar and in
-your agent threads.
+See and operate on Graphite stacks from BB.
 
 ## What you get
 
-- An **Example todos** page in the left sidebar that adds, completes, and
-  removes todos.
-- A `bb graphite` command that does the same from a terminal.
-- Live updates, so a change made in one place reaches every open page at once.
+- A compact composer banner showing the current branch's position, restack state,
+  offshoots, and the BB threads working on each branch.
+- `bb graphite stack` for a readable snapshot, or `--json` for structured output.
+- `bb graphite restack`, `submit`, `sync`, and `merge` for explicit, non-interactive
+  Graphite operations. Write commands check the workspace state first.
+- A read-only `graphite_stack` agent tool and a bundled skill.
 
-## How it works
+## Requirements and tradeoff
 
-The todos live in this plugin's own storage on the BB server, one list per
-installation. Nothing leaves the machine, and the plugin needs no account, API
-key, or external service.
+Install the Graphite CLI on the machine that owns the workspace and initialize
+Graphite in the repository. Reading a stack needs no Graphite account; submitting
+and merging PRs require the appropriate remote access.
 
-## For agents
-
-The bundled skill tells an agent to read the list with `bb graphite list`, add
-one todo at a time with `bb graphite add`, and close finished work with
-`bb graphite done`.
+The plugin reads Graphite's private metadata database without changing it. It
+warns when the database reports an unfamiliar migration, since a future Graphite
+release could change the schema.
