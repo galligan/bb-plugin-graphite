@@ -163,8 +163,11 @@ export default async function plugin(bb: BbPluginApi) {
 
       if (command === "stack") {
         const stack = await currentStack(bb, request);
-        if (json) return { exitCode: 0, stdout: JSON.stringify(stack, null, 2) };
-        return { exitCode: stack.outcome === "stacked" ? 0 : 1, stdout: renderStack(stack) };
+        // Same exit code either way: a caller testing `bb graphite stack` should not
+        // get a different answer for asking in JSON.
+        const exitCode = stack.outcome === "stacked" ? 0 : 1;
+        if (json) return { exitCode, stdout: JSON.stringify(stack, null, 2) };
+        return { exitCode, stdout: renderStack(stack) };
       }
 
       const verb = WRITE_VERBS.find((candidate) => candidate === command);
